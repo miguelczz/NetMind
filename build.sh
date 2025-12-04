@@ -9,9 +9,9 @@ echo "🔨 Iniciando build para Heroku..."
 # Navegar al directorio del frontend
 cd frontend
 
-# Instalar dependencias
+# Instalar dependencias (incluyendo devDependencies para el build)
 echo "📦 Instalando dependencias del frontend..."
-npm ci
+npm ci --include=dev
 
 # Construir el frontend
 echo "🏗️  Construyendo el frontend..."
@@ -26,7 +26,5 @@ mkdir -p backend/frontend_dist
 cp -r frontend/dist/* backend/frontend_dist/
 
 echo "✅ Archivos copiados a backend/frontend_dist/"
-
 echo "✅ Build completado exitosamente!"
 echo "📦 Los archivos del frontend están en backend/frontend_dist/"
-
