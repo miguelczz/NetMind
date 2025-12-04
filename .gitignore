@@ -1,0 +1,151 @@
+# ============================================
+# ARCHIVOS DE ENTORNO - NUNCA SUBIR AL REPOSITORIO
+# ============================================
+.env
+.env.local
+.env.*.local
+*.env
+.envrc
+
+# ============================================
+# DEPENDENCIAS
+# ============================================
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnp
+.pnp.js
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ============================================
+# ARCHIVOS DE BUILD Y DISTRIBUCIÓN
+# ============================================
+dist/
+build/
+backend/frontend_dist/
+*.pyc
+*.tsbuildinfo
+
+# ============================================
+# LOGS
+# ============================================
+*.log
+logs/
+*.log.*
+
+# ============================================
+# ARCHIVOS DE UPLOADS Y BASES DE DATOS
+# ============================================
+# Archivos subidos por usuarios (NO incluir en repo)
+backend/databases/uploads/
+backend/uploads/
+# Ignorar archivos de documentos en directorios de uploads
+backend/databases/uploads/**/*
+backend/uploads/**/*
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+dump.rdb
+*.rdb
+
+# Qdrant local (si hay persistencia)
+.qdrant/
+qdrant_storage/
+
+# ============================================
+# ARCHIVOS DE TESTING Y COBERTURA
+# ============================================
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.nyc_output/
+coverage/
+*.lcov
+
+# ============================================
+# CONFIGURACIÓN DE IDE
+# ============================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.spyderproject
+.spyproject
+*.swp
+*.swo
+*~
+
+# ============================================
+# ARCHIVOS DEL SISTEMA OPERATIVO
+# ============================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ============================================
+# ARCHIVOS TEMPORALES Y CACHE
+# ============================================
+# LangGraph
+.langgraph_api/
+
+# Vite
+.vite/
+vite.config.*.timestamp-*
+
+# Cache general
+.cache/
+.parcel-cache/
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# ============================================
+# DOCKER
+# ============================================
+.dockerignore
+docker-compose.override.yml
+
+# ============================================
+# OTROS
+# ============================================
+*.tgz
+.yarn-integrity
+.node_repl_history
+.eslintcache
+.stylelintcache
+

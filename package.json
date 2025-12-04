@@ -1,0 +1,14 @@
+{
+  "name": "netmind",
+  "version": "1.0.0",
+  "description": "NetMind - Full stack application",
+  "scripts": {
+    "build": "bash build.sh",
+    "heroku-postbuild": "npm run build"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
+

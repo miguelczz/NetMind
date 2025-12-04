@@ -1,0 +1,8 @@
+{
+    "dependencies": [
+        "."
+    ],
+    "graphs": {
+        "agent_router": "src.agent.agent_graph:graph"
+    }
+}
