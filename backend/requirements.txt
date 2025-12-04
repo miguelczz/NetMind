@@ -3,7 +3,7 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 qdrant-client
-psycopg2-binary
+psycopg2-binary>=2.9.0
 sqlalchemy
 python-multipart
 PyPDF2
