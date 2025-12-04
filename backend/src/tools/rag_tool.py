@@ -398,16 +398,34 @@ Genera una respuesta clara, natural y adaptada a la complejidad de la pregunta u
                         }
                     else:
                         logger.warning(f"[RAG] ⚠️ Hay {points_count} puntos en Qdrant pero la búsqueda no encontró resultados para: '{query_text[:50]}...'")
-                        logger.warning(f"[RAG] ⚠️ Esto puede indicar que la consulta no coincide con el contenido de los documentos")
+                        logger.warning(f"[RAG] ⚠️ Esto puede indicar que:")
+                        logger.warning(f"[RAG]     - La consulta no coincide con el contenido de los documentos")
+                        logger.warning(f"[RAG]     - Puede haber un problema con las dimensiones del vector (3072 vs 1536)")
+                        logger.warning(f"[RAG]     - Los embeddings pueden no estar generados correctamente")
+                        
+                        # Intentar una búsqueda más amplia con top_k mayor
+                        logger.info(f"[RAG] Intentando búsqueda alternativa con top_k=20...")
+                        try:
+                            query_vector = embedding_for_text(query_text)
+                            alternative_hits = self.qdrant_repo.search(query_vector=query_vector, top_k=20)
+                            if alternative_hits:
+                                logger.info(f"[RAG] ✅ Búsqueda alternativa encontró {len(alternative_hits)} resultados")
+                                hits = alternative_hits
+                            else:
+                                logger.warning(f"[RAG] ⚠️ Búsqueda alternativa tampoco encontró resultados")
+                        except Exception as e:
+                            logger.error(f"[RAG] Error en búsqueda alternativa: {e}")
                 except Exception as e:
                     logger.error(f"[RAG] Error al verificar colección: {e}")
                 
-                return {
-                    "answer": "No encontré información específica sobre tu pregunta en los documentos disponibles. Por favor, asegúrate de que tu pregunta esté relacionada con redes, telecomunicaciones o protocolos de red.",
-                    "hits": 0,
-                    "contexts": [],
-                    "source": "no_hits"
-                }
+                # Si después de la búsqueda alternativa aún no hay hits, retornar mensaje
+                if not hits:
+                    return {
+                        "answer": "No encontré información específica sobre tu pregunta en los documentos disponibles. Por favor, asegúrate de que tu pregunta esté relacionada con redes, telecomunicaciones o protocolos de red.",
+                        "hits": 0,
+                        "contexts": [],
+                        "source": "no_hits"
+                    }
         except Exception as e:
             # Si Qdrant no está disponible o hay error de conexión, retornar error
             error_msg = str(e)

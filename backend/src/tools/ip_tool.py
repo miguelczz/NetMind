@@ -112,30 +112,128 @@ class IPTool:
             else:
                 ping_info["avg_time"] = None
                 ping_info["packet_loss"] = 100
+                # Agregar mensaje de error cuando el ping falla
+                if not ping_info.get("error"):
+                    # Intentar extraer información del stderr o stdout
+                    error_text = result.stderr.strip() if result.stderr else ""
+                    if not error_text:
+                        # Si no hay stderr, usar un mensaje genérico basado en el stdout
+                        if "timeout" in result.stdout.lower() or "timed out" in result.stdout.lower():
+                            ping_info["error"] = "Timeout: no se recibieron respuestas en el tiempo esperado"
+                        elif "unreachable" in result.stdout.lower() or "no route" in result.stdout.lower():
+                            ping_info["error"] = "Host inalcanzable: no se pudo establecer conexión"
+                        else:
+                            ping_info["error"] = "No se recibieron respuestas del servidor"
+                    else:
+                        ping_info["error"] = error_text
             
             return ping_info
             
         except subprocess.TimeoutExpired:
-            # Si timeout, intentar con ping3
-            return self._ping_with_ping3(host, count)
+            # Si timeout, intentar con ping3, y si falla usar TCP
+            result = self._ping_with_ping3(host, count)
+            if not result.get("success"):
+                return self._ping_with_tcp(host, count)
+            return result
         except FileNotFoundError:
-            # Si el comando no existe, usar ping3 como alternativa
-            return self._ping_with_ping3(host, count)
+            # Si el comando no existe, usar ping3 como alternativa, y si falla usar TCP
+            result = self._ping_with_ping3(host, count)
+            if not result.get("success"):
+                return self._ping_with_tcp(host, count)
+            return result
         except Exception as e:
-            # Si hay otro error, intentar con ping3
-            return self._ping_with_ping3(host, count)
+            # Si hay otro error, intentar con ping3, y si falla usar TCP
+            result = self._ping_with_ping3(host, count)
+            if not result.get("success"):
+                return self._ping_with_tcp(host, count)
+            return result
+    
+    def _ping_with_tcp(self, host: str, count: int = 4) -> Dict[str, Any]:
+        """
+        Método alternativo usando conexiones TCP cuando ICMP no está disponible.
+        Este método funciona sin permisos especiales y es compatible con Heroku.
+        """
+        times = []
+        successful_pings = 0
+        
+        # Resolver el host a IP si es necesario
+        try:
+            resolved_ip = self.resolve_domain(host)
+        except Exception as e:
+            return {
+                "host": host,
+                "error": f"No se pudo resolver el dominio: {str(e)}",
+                "avg_time": None,
+                "success": False
+            }
+        
+        # Intentar puertos comunes (80 para HTTP, 443 para HTTPS)
+        ports_to_try = [80, 443, 22]
+        
+        # Realizar múltiples pings
+        for i in range(count):
+            ping_time = None
+            for port in ports_to_try:
+                try:
+                    # Crear socket y medir tiempo de conexión
+                    start_time = time.time()
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(5)
+                    result = sock.connect_ex((resolved_ip, port))
+                    end_time = time.time()
+                    sock.close()
+                    
+                    if result == 0:
+                        # Conexión exitosa
+                        ping_time = (end_time - start_time) * 1000  # Convertir a milisegundos
+                        successful_pings += 1
+                        times.append(ping_time)
+                        break  # Si un puerto funciona, no intentar los demás
+                except socket.timeout:
+                    # Timeout en este puerto, intentar el siguiente
+                    continue
+                except Exception as e:
+                    # Error en este puerto, intentar el siguiente
+                    continue
+            
+            # Si ningún puerto funcionó, esperar un poco antes del siguiente intento
+            if ping_time is None:
+                time.sleep(0.5)
+        
+        if times:
+            ping_info = {
+                "host": host,
+                "resolved_ip": resolved_ip if resolved_ip != host else None,
+                "stdout": f"Ping a {host} ({resolved_ip}): {successful_pings}/{count} paquetes recibidos (método TCP)",
+                "returncode": 0,
+                "success": True,
+                "times": times,
+                "min_time": min(times),
+                "max_time": max(times),
+                "avg_time": sum(times) / len(times),
+                "packet_loss": ((count - successful_pings) / count) * 100
+            }
+            return ping_info
+        else:
+            return {
+                "host": host,
+                "resolved_ip": resolved_ip if resolved_ip != host else None,
+                "stdout": f"Ping a {host} ({resolved_ip}): 0/{count} paquetes recibidos",
+                "returncode": 1,
+                "success": False,
+                "error": "No se pudo establecer conexión TCP con ningún puerto común (80, 443, 22)",
+                "avg_time": None,
+                "packet_loss": 100
+            }
     
     def _ping_with_ping3(self, host: str, count: int = 4) -> Dict[str, Any]:
         """
         Método alternativo usando la biblioteca ping3 cuando subprocess no está disponible.
+        Nota: Este método puede fallar en entornos sin permisos de root (como Heroku).
         """
         if not PING3_AVAILABLE:
-            return {
-                "host": host,
-                "error": "Comando ping no disponible y biblioteca ping3 no instalada. Instala con: pip install ping3",
-                "avg_time": None,
-                "success": False
-            }
+            # Si ping3 no está disponible, usar método TCP
+            return self._ping_with_tcp(host, count)
         
         try:
             times = []
@@ -157,6 +255,9 @@ class IPTool:
                     else:
                         # Timeout o no respuesta
                         pass
+                except (PermissionError, OSError) as e:
+                    # Si no hay permisos (común en Heroku), usar método TCP
+                    return self._ping_with_tcp(host, count)
                 except Exception as e:
                     # Error en un ping individual, continuar con los siguientes
                     continue
@@ -176,24 +277,15 @@ class IPTool:
                 }
                 return ping_info
             else:
-                return {
-                    "host": host,
-                    "resolved_ip": resolved_ip if resolved_ip != host else None,
-                    "stdout": f"Ping a {host} ({resolved_ip}): 0/{count} paquetes recibidos",
-                    "returncode": 1,
-                    "success": False,
-                    "error": "No se recibieron respuestas",
-                    "avg_time": None,
-                    "packet_loss": 100
-                }
+                # Si ping3 no funcionó, intentar con TCP como fallback
+                return self._ping_with_tcp(host, count)
                 
+        except (PermissionError, OSError) as e:
+            # Si no hay permisos, usar método TCP
+            return self._ping_with_tcp(host, count)
         except Exception as e:
-            return {
-                "host": host,
-                "error": f"Error al hacer ping con ping3: {str(e)}",
-                "avg_time": None,
-                "success": False
-            }
+            # Si hay otro error, intentar con TCP como fallback
+            return self._ping_with_tcp(host, count)
     
     def measure_response_time(self, host: str) -> float:
         """
@@ -415,19 +507,36 @@ class IPTool:
                 "returncode": 0,
                 "host": host,
                 "type": "ping",
+                "success": True,
                 "avg_time": ping_result.get("avg_time"),
                 "min_time": ping_result.get("min_time"),
                 "max_time": ping_result.get("max_time"),
-                "times": ping_result.get("times", [])
+                "times": ping_result.get("times", []),
+                "packet_loss": ping_result.get("packet_loss", 0),
+                "resolved_ip": ping_result.get("resolved_ip")
             }
         else:
+            # Cuando falla, asegurar que tenemos toda la información necesaria
+            error_msg = ping_result.get("error")
+            if not error_msg:
+                # Si no hay mensaje de error explícito, crear uno basado en el resultado
+                if ping_result.get("packet_loss") == 100:
+                    error_msg = "No se recibieron respuestas del servidor"
+                elif ping_result.get("returncode") != 0:
+                    error_msg = "El ping falló sin recibir respuestas"
+                else:
+                    error_msg = "Error al ejecutar ping"
+            
             result = {
                 "stdout": ping_result.get("stdout", ""),
                 "stderr": ping_result.get("error", ""),
-                "returncode": 1,
+                "returncode": ping_result.get("returncode", 1),
                 "host": host,
                 "type": "ping",
-                "error": ping_result.get("error", "Error al ejecutar ping")
+                "success": False,
+                "error": error_msg,
+                "packet_loss": ping_result.get("packet_loss", 100),
+                "resolved_ip": ping_result.get("resolved_ip")
             }
         
         return result
@@ -539,22 +648,35 @@ class IPTool:
             max_time = result.get("max_time")
             resolved_ip = result.get("resolved_ip")
             packet_loss = result.get("packet_loss")
+            success = result.get("success", True)
+            error_msg = result.get("error")
             
             parts = [f"Ping a {host}"]
             if resolved_ip and resolved_ip != host:
                 parts.append(f" ({resolved_ip})")
-            parts.append(f":\n{stdout}")
             
-            if avg_time is not None:
+            # Si hay stdout, mostrarlo
+            if stdout:
+                parts.append(f":\n{stdout}")
+            else:
+                parts.append(":")
+            
+            # Si el ping fue exitoso, mostrar métricas
+            if success and avg_time is not None:
                 parts.append(f"\n\nLatencia promedio: {avg_time:.2f}ms")
                 if min_time is not None and max_time is not None:
                     parts.append(f" (min: {min_time:.2f}ms, max: {max_time:.2f}ms)")
                 if packet_loss is not None and packet_loss > 0:
                     parts.append(f"\nPérdida de paquetes: {packet_loss:.1f}%")
             
-            # Si hay error pero no es crítico, mostrarlo
-            if "error" in result and result.get("success", False):
-                parts.append(f"\nNota: {result['error']}")
+            # Si el ping falló, mostrar el error claramente
+            if not success:
+                if error_msg:
+                    parts.append(f"\n\n❌ Error: {error_msg}")
+                else:
+                    parts.append(f"\n\n❌ No se recibieron respuestas del servidor")
+                if packet_loss is not None and packet_loss == 100:
+                    parts.append(f"\nPérdida de paquetes: 100% (no se recibieron respuestas)")
             
             return "\n".join(parts)
         

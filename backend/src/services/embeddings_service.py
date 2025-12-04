@@ -87,12 +87,23 @@ async def process_and_store_pdf(path: str, document_id: str = None) -> str:
 
     # Insertar en Qdrant usando el repositorio
     try:
+        logger.info(f"Insertando {len(points)} puntos en Qdrant para document_id: {document_id}")
         success = _qdrant_repo.upsert_points(points)
         if not success:
             raise ValueError("upsert_points retornó False")
-        logger.info(f"Puntos insertados exitosamente en Qdrant para document_id: {document_id}")
+        
+        # Verificar que se insertaron todos los puntos
+        collection_info = _qdrant_repo.get_collection_info()
+        if isinstance(collection_info, dict) and "error" not in collection_info:
+            points_count = collection_info.get('points_count', 0)
+            logger.info(f"✅ Verificación: Colección Qdrant tiene {points_count} puntos totales después de insertar {len(points)} puntos para document_id: {document_id}")
+        else:
+            logger.warning(f"⚠️ No se pudo verificar la inserción en Qdrant: {collection_info}")
+        
+        logger.info(f"✅ Puntos insertados exitosamente en Qdrant para document_id: {document_id} ({len(points)} chunks)")
     except Exception as e:
-        logger.error(f"Error al insertar puntos en Qdrant: {str(e)}", exc_info=True)
+        logger.error(f"❌ Error al insertar puntos en Qdrant: {str(e)}", exc_info=True)
+        logger.error(f"❌ Se intentaron insertar {len(points)} puntos pero falló")
         raise
     
     return document_id

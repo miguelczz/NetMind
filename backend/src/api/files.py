@@ -42,29 +42,33 @@ async def upload_pdf(
     logger.info(f"Archivo guardado. Document ID: {document_id}, Path: {file_path}")
     
     # Procesar PDF (chunk + embeddings + store en Qdrant)
+    chunk_count = 0
     try:
+        # Obtener número de puntos antes de insertar
+        collection_info_before = qdrant_repo.get_collection_info()
+        points_before = collection_info_before.get('points_count', 0) if isinstance(collection_info_before, dict) else 0
+        
         processed_doc_id = await process_and_store_pdf(file_path, document_id=document_id)
         logger.info(f"PDF procesado exitosamente. Document ID: {processed_doc_id}")
+        
+        # Verificar que los datos se insertaron en Qdrant
+        collection_info_after = qdrant_repo.get_collection_info()
+        if "error" in collection_info_after:
+            logger.warning(f"Error al verificar colección Qdrant: {collection_info_after['error']}")
+        else:
+            points_after = collection_info_after.get('points_count', 0)
+            chunk_count = points_after - points_before
+            logger.info(f"✅ Colección Qdrant verificada. Puntos antes: {points_before}, después: {points_after}, nuevos chunks: {chunk_count}")
+            
+            if chunk_count == 0:
+                logger.error(f"❌ ERROR CRÍTICO: No se insertaron chunks en Qdrant. Puntos antes: {points_before}, después: {points_after}")
+                raise ValueError("No se insertaron chunks en Qdrant. Verifica los logs para más detalles.")
     except Exception as e:
         logger.error(f"Error al procesar PDF: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, 
             detail=f"Error al procesar el PDF: {str(e)}"
         )
-    
-    # Verificar que los datos se insertaron en Qdrant
-    try:
-        collection_info = qdrant_repo.get_collection_info()
-        if "error" in collection_info:
-            logger.warning(f"Error al verificar colección Qdrant: {collection_info['error']}")
-        else:
-            logger.info(f"Colección Qdrant verificada. Puntos totales: {collection_info.get('points_count', 0)}")
-    except Exception as e:
-        logger.warning(f"No se pudo verificar colección Qdrant: {str(e)}")
-    
-    # Obtener número de chunks (simplificado, podría mejorarse)
-    # Por ahora, asumimos que se procesó correctamente
-    chunk_count = 0  # Se podría calcular desde Qdrant si es necesario
     
     # Guardar metadatos en BD
     document_repo.create_document_metadata(

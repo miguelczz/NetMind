@@ -157,23 +157,41 @@ class QdrantRepository:
                     )
                 )
             
-            # Construir objetos PointStruct
-            qdrant_points = [
-                qmodels.PointStruct(
-                    id=p.get("id") or str(uuid.uuid4()),
-                    vector=p["vector"],
-                    payload=p["payload"]
-                )
-                for p in points
-            ]
+            # Qdrant puede tener límites en el tamaño del batch
+            # Dividir en batches de 100 puntos para evitar problemas
+            batch_size = 100
+            total_points = len(points)
+            inserted_count = 0
             
-            # Insertar puntos
-            result = self.client.upsert(
-                collection_name=self.collection_name,
-                points=qdrant_points
-            )
+            for i in range(0, total_points, batch_size):
+                batch = points[i:i + batch_size]
+                qdrant_points = [
+                    qmodels.PointStruct(
+                        id=p.get("id") or str(uuid.uuid4()),
+                        vector=p["vector"],
+                        payload=p["payload"]
+                    )
+                    for p in batch
+                ]
+                
+                # Insertar batch
+                try:
+                    result = self.client.upsert(
+                        collection_name=self.collection_name,
+                        points=qdrant_points
+                    )
+                    inserted_count += len(batch)
+                    logging.info(f"Batch {i//batch_size + 1}/{(total_points + batch_size - 1)//batch_size}: {len(batch)} puntos insertados (total: {inserted_count}/{total_points})")
+                except Exception as e:
+                    logging.error(f"Error al insertar batch {i//batch_size + 1}: {str(e)}")
+                    raise
             
-            logging.info(f"Puntos insertados exitosamente. Status: {result.status if hasattr(result, 'status') else 'OK'}")
+            logging.info(f"✅ Todos los puntos insertados exitosamente: {inserted_count}/{total_points}")
+            
+            # Verificar que se insertaron todos los puntos
+            if inserted_count != total_points:
+                logging.warning(f"⚠️ Advertencia: Se esperaban {total_points} puntos pero se insertaron {inserted_count}")
+            
             return True
             
         except Exception as e:

@@ -33,6 +33,16 @@ export function useChat() {
     }
   }, [messages])
 
+  // Guardar mensajes cuando se sale de la página de chat
+  useEffect(() => {
+    if (location.pathname !== '/' && messages.length > 0) {
+      const messagesKey = `${SESSION_CONFIG.STORAGE_KEY}_messages`
+      setStorageItem(messagesKey, messages)
+      // Resetear el flag cuando salimos de la página
+      hasLoadedRef.current = false
+    }
+  }, [location.pathname, messages])
+
   // Cargar historial de sesión al montar el componente o cuando se vuelve a la página de chat
   useEffect(() => {
     // Solo cargar si estamos en la página de chat
@@ -41,6 +51,11 @@ export function useChat() {
     }
 
     const loadSessionHistory = async () => {
+      // Evitar cargar múltiples veces en la misma sesión de página
+      if (hasLoadedRef.current) {
+        return
+      }
+
       try {
         setIsLoadingHistory(true)
         
@@ -62,6 +77,7 @@ export function useChat() {
             content: msg.content,
             timestamp: new Date().toISOString(),
           }))
+          // Actualizar con los mensajes del backend (más actualizados)
           setMessages(formattedMessages)
         } else if (cachedMessages.length === 0) {
           // Si no hay mensajes en backend ni en cache, limpiar
