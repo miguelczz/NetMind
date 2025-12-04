@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import { Send, Loader2 } from 'lucide-react'
 import { Textarea } from '../ui/Textarea'
 import { Button } from '../ui/Button'
+import { getStorageItem, setStorageItem } from '../../utils/storage'
+
+const CHAT_INPUT_STORAGE_KEY = 'netmind_chat_input_draft'
 
 /**
  * Componente de input para el chat
@@ -11,8 +14,21 @@ import { Button } from '../ui/Button'
  * @param {boolean} props.disabled - Si está deshabilitado
  */
 export function ChatInput({ onSend, isLoading = false, disabled = false }) {
-  const [input, setInput] = useState('')
+  // Cargar texto guardado del localStorage al montar
+  const [input, setInput] = useState(() => {
+    return getStorageItem(CHAT_INPUT_STORAGE_KEY, '')
+  })
   const textareaRef = useRef(null)
+  
+  // Guardar el texto en localStorage cada vez que cambia
+  useEffect(() => {
+    if (input.trim()) {
+      setStorageItem(CHAT_INPUT_STORAGE_KEY, input)
+    } else {
+      // Limpiar si está vacío
+      setStorageItem(CHAT_INPUT_STORAGE_KEY, '')
+    }
+  }, [input])
 
   // Auto-ajustar altura del textarea
   useEffect(() => {
@@ -28,6 +44,8 @@ export function ChatInput({ onSend, isLoading = false, disabled = false }) {
 
     onSend(input.trim())
     setInput('')
+    // Limpiar el texto guardado después de enviar
+    setStorageItem(CHAT_INPUT_STORAGE_KEY, '')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }

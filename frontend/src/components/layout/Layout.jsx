@@ -21,31 +21,31 @@ export function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-dark-bg-primary flex flex-col overflow-x-hidden w-full">
-      {/* Header moderno inspirado en los mejores diseños de IA */}
-      <header className="border-b border-dark-border-primary/30 bg-dark-bg-primary/95 backdrop-blur-xl sticky top-0 z-50 shadow-gemini-sm overflow-x-hidden">
+      {/* Header moderno inspirado en los mejores diseños de IA - FIJO */}
+      <header className="border-b border-dark-border-primary/30 bg-dark-bg-primary/95 backdrop-blur-xl fixed top-0 left-0 right-0 z-50 shadow-gemini-sm overflow-x-hidden">
         <div className="container-app">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between h-14 sm:h-16">
+            <div className="flex items-center gap-2 sm:gap-4">
               {/* Logo de telecomunicaciones */}
               <Logo size="md" />
               <div>
-                <h1 className="text-lg font-medium text-dark-text-primary tracking-tight">
+                <h1 className="text-base sm:text-lg font-medium text-dark-text-primary tracking-tight">
                   NetMind
                 </h1>
-                <p className="text-xs text-dark-text-muted -mt-0.5">Asistente Inteligente</p>
+                <p className="text-[10px] sm:text-xs text-dark-text-muted -mt-0.5">Asistente Inteligente</p>
               </div>
             </div>
 
-            <nav className="flex items-center gap-2">
+            <nav className="flex items-center gap-1 sm:gap-2">
               {/* Botón de limpiar conversación - solo en chat y cuando hay mensajes */}
               {location.pathname === '/' && hasMessages && clearChatAction && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={clearChatAction}
-                  className="text-dark-text-muted hover:text-dark-status-error hover:bg-dark-status-error/10 rounded-xl transition-all duration-200"
+                  className="text-dark-text-muted hover:text-dark-status-error hover:bg-dark-status-error/10 rounded-xl transition-all duration-200 px-2 sm:px-3"
                 >
-                  <Trash2 className="w-4 h-4 mr-1.5" />
+                  <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 sm:mr-1.5" />
                   <span className="hidden sm:inline">Limpiar</span>
                 </Button>
               )}
@@ -58,14 +58,14 @@ export function Layout({ children }) {
                     key={item.path}
                     to={item.path}
                     className={cn(
-                      'flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-200',
-                      'font-medium text-sm',
+                      'flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 rounded-xl transition-all duration-200',
+                      'font-medium text-xs sm:text-sm',
                       isActive
                         ? 'bg-dark-accent-primary text-white shadow-gemini-sm'
                         : 'text-dark-text-secondary hover:text-dark-text-primary hover:bg-dark-surface-hover'
                     )}
                   >
-                    <Icon className="w-4 h-4" />
+                    <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     <span className="hidden sm:inline">{item.label}</span>
                   </Link>
                 )
@@ -75,8 +75,8 @@ export function Layout({ children }) {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col overflow-hidden min-h-0 overflow-x-hidden w-full">
+      {/* Main Content con padding-top para compensar el header fijo */}
+      <main className="flex-1 flex flex-col overflow-hidden min-h-0 overflow-x-hidden w-full pt-14 sm:pt-16">
         {children}
       </main>
 
