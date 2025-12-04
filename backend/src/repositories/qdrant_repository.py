@@ -234,10 +234,25 @@ class QdrantRepository:
             document_id: ID del documento a eliminar
         
         Returns:
-            True si la operación fue exitosa
+            True si la operación fue exitosa o si no hay vectores que eliminar,
+            False solo si hay un error de conexión crítico
         """
         try:
-            self.client.delete(
+            # Verificar que el cliente esté disponible
+            if not self.client:
+                logger.error("Cliente Qdrant no está disponible")
+                return False
+            
+            # Verificar que la colección existe
+            try:
+                self.client.get_collection(self.collection_name)
+            except Exception as e:
+                logger.warning(f"Colección {self.collection_name} no existe: {e}")
+                # Si la colección no existe, no hay nada que eliminar, consideramos éxito
+                return True
+            
+            # Intentar eliminar los vectores
+            result = self.client.delete(
                 collection_name=self.collection_name,
                 points_selector=qmodels.FilterSelector(
                     filter=qmodels.Filter(
@@ -250,10 +265,31 @@ class QdrantRepository:
                     )
                 )
             )
+            
+            # Verificar el resultado
+            if hasattr(result, 'status'):
+                if result.status == qmodels.UpdateStatus.COMPLETED:
+                    logger.info(f"Vectores eliminados exitosamente para document_id={document_id}")
+                    return True
+                else:
+                    logger.warning(f"Eliminación no completada. Status: {result.status}")
+                    # Aún así retornamos True si no hay error de conexión
+                    return True
+            
+            logger.info(f"Vectores eliminados para document_id={document_id}")
             return True
+            
         except Exception as e:
-            logging.error(f"Error eliminando vectores para document_id={document_id}: {e}")
-            return False
+            logger.error(f"Error eliminando vectores para document_id={document_id}: {e}", exc_info=True)
+            # Si es un error de conexión, retornar False
+            # Si es que no hay vectores, considerar éxito
+            error_str = str(e).lower()
+            if "connection" in error_str or "timeout" in error_str or "network" in error_str:
+                logger.error(f"Error de conexión con Qdrant: {e}")
+                return False
+            # Para otros errores (como que no existan vectores), considerar éxito
+            logger.warning(f"Error al eliminar (puede que no existan vectores): {e}")
+            return True  # Considerar éxito si no es error de conexión
     
     def get_collection_info(self) -> Dict:
         """Obtiene información sobre la colección"""

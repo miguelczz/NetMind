@@ -116,13 +116,16 @@ async def delete_file(
     # Eliminar archivo del sistema de archivos
     document_repo.delete_file(document_id)
     
-    # Eliminar vectores de Qdrant
-    deleted = delete_by_id(document_id)
-    if not deleted:
-        raise HTTPException(
-            status_code=500, 
-            detail="Failed to delete vectors from Qdrant"
-        )
+    # Eliminar vectores de Qdrant (no crítico si falla)
+    try:
+        deleted = delete_by_id(document_id)
+        if not deleted:
+            logger.warning(f"No se pudieron eliminar vectores de Qdrant para document_id={document_id}, pero continuando...")
+        else:
+            logger.info(f"Vectores eliminados exitosamente de Qdrant para document_id={document_id}")
+    except Exception as e:
+        logger.error(f"Error al eliminar vectores de Qdrant para document_id={document_id}: {e}", exc_info=True)
+        # Continuar con la eliminación aunque falle Qdrant
 
     # Eliminar metadatos de BD
     document_repo.delete_document(db, document_id)
