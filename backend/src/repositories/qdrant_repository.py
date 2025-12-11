@@ -49,6 +49,9 @@ class QdrantRepository:
         
         self.collection_name = collection_name
         self._ensure_collection()
+        
+        # Detectar qué método de búsqueda está disponible (una sola vez al inicializar)
+        self._detect_search_method()
     
     def _normalize_qdrant_url(self, url: str) -> str:
         """
@@ -97,6 +100,31 @@ class QdrantRepository:
             except Exception:
                 # Si falla, probablemente ya existe, continuar
                 pass
+    
+    def _detect_search_method(self):
+        """
+        Detecta qué método de búsqueda está disponible en el cliente Qdrant.
+        Esto se hace una sola vez al inicializar para evitar intentos múltiples en cada búsqueda.
+        """
+        self._search_method = None
+        self._search_method_name = None
+        
+        # Prioridad: search_points() > query_points() > search()
+        if hasattr(self.client, 'search_points'):
+            self._search_method = 'search_points'
+            self._search_method_name = 'search_points()'
+            logger.info("[QdrantRepository] Método de búsqueda detectado: search_points()")
+        elif hasattr(self.client, 'query_points'):
+            self._search_method = 'query_points'
+            self._search_method_name = 'query_points()'
+            logger.info("[QdrantRepository] Método de búsqueda detectado: query_points()")
+        elif hasattr(self.client, 'search'):
+            self._search_method = 'search'
+            self._search_method_name = 'search()'
+            logger.info("[QdrantRepository] Método de búsqueda detectado: search() (legacy)")
+        else:
+            logger.error("[QdrantRepository] ⚠️ No se encontró ningún método de búsqueda disponible")
+            self._search_method = None
     
     def upsert_points(
         self, 
@@ -236,52 +264,58 @@ class QdrantRepository:
             
             logger.debug(f"[QdrantRepository] Buscando en colección '{self.collection_name}' con top_k={top_k}, vector_size={len(query_vector)}")
             
-            # Usar query_points() que es el método correcto en versiones recientes de qdrant-client
-            # query_points() reemplaza a search() en versiones >= 1.7.0
-            if hasattr(self.client, 'query_points'):
-                # Método moderno: query_points()
-                try:
-                    # Formato más simple y compatible: pasar el vector directamente como NamedVector
-                    # Si la colección tiene un solo vector, name puede ser vacío o None
-                    query_result = self.client.query_points(
+            # Usar el método detectado al inicializar (evita intentos múltiples)
+            if not self._search_method:
+                logger.error("[QdrantRepository] No hay método de búsqueda disponible")
+                return []
+            
+            hits = []
+            
+            try:
+                if self._search_method == 'search_points':
+                    # Método más moderno: search_points()
+                    search_result = self.client.search_points(
                         collection_name=self.collection_name,
-                        query=qmodels.NamedVector(
-                            name="",  # Vector por defecto (vacío = vector principal)
-                            vector=query_vector
-                        ),
+                        query_vector=query_vector,
                         limit=top_k,
                         query_filter=filter_obj
                     )
-                    hits = query_result.points if hasattr(query_result, 'points') else []
-                except Exception as e:
-                    logger.error(f"[QdrantRepository] Error en query_points: {e}", exc_info=True)
-                    # Intentar con formato alternativo usando Query wrapper
+                    hits = search_result if isinstance(search_result, list) else (search_result.points if hasattr(search_result, 'points') else [])
+                    
+                elif self._search_method == 'query_points':
+                    # Método alternativo: query_points() con vector directo como lista
                     try:
+                        # Intentar primero con vector directo (más simple)
                         query_result = self.client.query_points(
                             collection_name=self.collection_name,
-                            query=qmodels.Query(
-                                vector=qmodels.NamedVector(
-                                    name="",
-                                    vector=query_vector
-                                )
-                            ),
+                            query=query_vector,  # Vector directo como lista
                             limit=top_k,
                             query_filter=filter_obj
                         )
                         hits = query_result.points if hasattr(query_result, 'points') else []
-                    except Exception as e2:
-                        logger.error(f"[QdrantRepository] Ambos formatos de query_points fallaron: {e}, {e2}")
-                        return []
-            elif hasattr(self.client, 'search'):
-                # Método legacy: search() (versiones antiguas)
-                hits = self.client.search(
-                    collection_name=self.collection_name,
-                    query_vector=query_vector,
-                    limit=top_k,
-                    query_filter=filter_obj
-                )
-            else:
-                logger.error(f"[QdrantRepository] Cliente Qdrant no tiene métodos 'query_points' ni 'search'. Métodos disponibles: {[m for m in dir(self.client) if not m.startswith('_')]}")
+                    except Exception:
+                        # Si falla, intentar con Query wrapper (solo una vez más)
+                        query_result = self.client.query_points(
+                            collection_name=self.collection_name,
+                            query=qmodels.Query(vector=query_vector),
+                            limit=top_k,
+                            query_filter=filter_obj
+                        )
+                        hits = query_result.points if hasattr(query_result, 'points') else []
+                    
+                elif self._search_method == 'search':
+                    # Método legacy: search()
+                    hits = self.client.search(
+                        collection_name=self.collection_name,
+                        query_vector=query_vector,
+                        limit=top_k,
+                        query_filter=filter_obj
+                    )
+                
+                logger.debug(f"[QdrantRepository] Búsqueda con {self._search_method_name} retornó {len(hits)} resultados")
+                
+            except Exception as e:
+                logger.error(f"[QdrantRepository] Error en búsqueda con {self._search_method_name}: {e}", exc_info=True)
                 return []
             
             logger.debug(f"[QdrantRepository] Búsqueda retornó {len(hits)} resultados")
