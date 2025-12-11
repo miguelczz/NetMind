@@ -82,15 +82,24 @@ RELEVANCE RULES (STEP 1):
 
 TOOL DECISION RULES (STEP 2 - only if relevant):
 1. ANALYZE THE USER REQUEST CAREFULLY: Break down the request into separate parts if it contains multiple questions or tasks.
-2. UNDERSTAND META-QUESTIONS ABOUT KNOWLEDGE AND CAPABILITIES:
-   - Questions like "qué información tienes", "qué temas puedes enseñar", "qué sabes sobre", "qué conocimientos tienes", "qué puedes explicar", "sobre qué temas tienes información" are asking about the agent's knowledge base and available information
-   - These should ALWAYS use RAG tool with a plan step like "retrieve information about available topics and knowledge in documents" or "query what information is available about [topic]"
-   - The agent should understand these are requests to explore what information exists in the knowledge base, not requests for specific technical operations
-   - Examples:
+2. UNDERSTAND META-QUESTIONS ABOUT KNOWLEDGE AND CAPABILITIES (CONTEXTUAL UNDERSTANDING):
+   - When the user asks questions about WHAT INFORMATION YOU HAVE, WHAT TOPICS YOU HANDLE/MANAGE, WHAT TOPICS YOU CAN TEACH, or WHAT KNOWLEDGE IS AVAILABLE, you must understand the INTENTION, not match keywords
+   - Analyze the CONTEXT and INTENTION: Is the user asking to EXPLORE what information/topics exist in the knowledge base? Or are they asking for SPECIFIC information about a topic?
+   - CRITICAL: Questions about YOUR CAPABILITIES, YOUR TOPICS, WHAT YOU HANDLE, WHAT YOU CAN DO are exploration questions
+   - If the user is asking to explore available knowledge/information/topics (without asking for specific information about a topic), use RAG tool with plan step like "retrieve information about available topics and knowledge in documents"
+   - If the user is asking for specific information about a topic (even if phrased as "qué sabes sobre X"), use RAG tool with plan step like "retrieve information about [specific topic]"
+   - DO NOT use keyword matching - understand the INTENTION from context
+   - Be FLEXIBLE: "qué temas manejas", "qué temas de X manejas", "qué información tienes", "qué temas puedes enseñar" are ALL exploration questions
+   - Examples of exploration questions (asking what you have/handle):
      * "Qué información tienes?" → tool: "rag", plan_step: "retrieve information about available topics and knowledge in documents"
      * "Qué temas puedes enseñar?" → tool: "rag", plan_step: "retrieve information about available educational topics in documents"
+     * "Qué temas manejas?" → tool: "rag", plan_step: "retrieve information about available topics and knowledge in documents"
+     * "Qué temas de redes manejas?" → tool: "rag", plan_step: "retrieve information about available network topics in documents"
+     * "Y que otros temas aparte del ping manejas?" → tool: "rag", plan_step: "retrieve information about available topics and knowledge in documents"
+   - Examples of specific information requests (asking about a topic):
      * "Y sobre cables de fibra optica?" → tool: "rag", plan_step: "retrieve information about fiber optic cables"
      * "Qué sabes sobre DNS?" → tool: "rag", plan_step: "retrieve information about DNS"
+     * "Qué es DNS?" → tool: "rag", plan_step: "retrieve information about what DNS is"
 3. IMPORTANT: If the user is asking for a follow-up, conclusion, or continuation of a previous conversation (e.g., "conclusión", "resumen", "entonces", "en resumen", "dame más detalles sobre lo anterior"), use RAG tool but be aware it should use conversation context.
 4. UNDERSTAND USER INTENTION FROM CONTEXT: When the user makes a request like "haz uno", "hazlo", "ejecuta uno", "realiza uno", "haz un", "ejecuta un", you must understand what they want to do by analyzing:
    - The conversation context: What was discussed in previous messages? What operation or concept was mentioned?
@@ -139,11 +148,16 @@ TOOL DECISION RULES (STEP 2 - only if relevant):
 
 11. The "tool" field should be the PRIMARY tool if multiple are needed, or the only tool if one is needed.
 
-12. CONTEXTUAL UNDERSTANDING: When the user asks questions that seem vague but are actually asking about available information or knowledge:
-    - "Qué información tienes?" → Understand as: "What information/knowledge do you have in your documents?"
-    - "Qué temas puedes enseñar?" → Understand as: "What topics can you teach based on your knowledge base?"
-    - "Y sobre [topic]?" → Understand as: "What information do you have about [topic]?"
-    - These should trigger RAG tool to search the knowledge base, even if the question doesn't explicitly mention "what is" or "explain"
+12. CONTEXTUAL UNDERSTANDING (NO KEYWORD MATCHING): When analyzing user questions, understand the INTENTION and CONTEXT, not just match keywords:
+    - Analyze if the user is asking to EXPLORE what information is available (meta-question about knowledge base)
+    - Analyze if the user is asking for SPECIFIC information about a topic (information request)
+    - Use your understanding of context and intention to determine the appropriate tool and plan step
+    - DO NOT rely on specific phrases or keywords - understand what the user really wants to know
+    - The key is understanding the user's INTENTION from the full context, not matching specific words or phrases
+    - Examples of contextual understanding (these are examples of INTENTION, not keywords to match):
+      * If user asks about what information/knowledge is available → Understand intention: user wants to explore available topics → tool: "rag", plan_step: "retrieve information about available topics and knowledge in documents"
+      * If user asks what topics can be taught → Understand intention: user wants to know educational topics available → tool: "rag", plan_step: "retrieve information about available educational topics in documents"
+      * If user asks about a specific topic → Understand intention: user wants specific information about that topic → tool: "rag", plan_step: "retrieve information about [topic]"
 
 OUTPUT FORMAT:
 Respond with a valid JSON containing these keys:

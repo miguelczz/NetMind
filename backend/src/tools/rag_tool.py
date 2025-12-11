@@ -333,29 +333,69 @@ Genera una respuesta clara, natural y adaptada a la complejidad de la pregunta u
             for h in hits
         )
     
-    def _is_knowledge_exploration_query(self, query_text: str) -> bool:
+    async def _is_knowledge_exploration_query(self, query_text: str, conversation_context: Optional[str] = None) -> bool:
         """
-        Detecta si la consulta es una pregunta exploratoria sobre el conocimiento disponible.
-        Estas preguntas requieren una estrategia de búsqueda diferente.
+        Usa el LLM para determinar si la consulta es una pregunta exploratoria sobre el conocimiento disponible.
+        NO usa palabras clave, solo comprensión contextual del LLM.
         """
-        query_lower = query_text.lower()
-        exploration_patterns = [
-            "qué información tienes",
-            "qué temas puedes enseñar",
-            "qué sabes sobre",
-            "qué conocimientos tienes",
-            "qué puedes explicar",
-            "sobre qué temas tienes información",
-            "qué información dispones",
-            "qué temas cubres",
-            "qué puedes enseñar",
-            "qué información hay disponible",
-            "qué temas están disponibles",
-            "qué información contiene",
-            "qué temas abarcas",
-            "qué información posees"
-        ]
-        return any(pattern in query_lower for pattern in exploration_patterns)
+        try:
+            exploration_detection_prompt = f"""
+Analiza la siguiente pregunta del usuario y determina si está preguntando sobre QUÉ INFORMACIÓN, TEMAS o CONOCIMIENTOS tienes disponibles en tu base de conocimiento.
+
+Pregunta del usuario: "{query_text}"
+
+{("Contexto de conversación previa:\n" + conversation_context[:500] + "\n\n") if conversation_context else ""}
+
+INSTRUCCIONES CRÍTICAS:
+1. Analiza la INTENCIÓN de la pregunta, NO las palabras exactas
+2. Si la pregunta busca EXPLORAR qué información/temas/conocimientos están disponibles (sin pedir información específica sobre un tema), marca como "exploratoria"
+3. Si la pregunta busca información ESPECÍFICA sobre un tema concreto (ej: "qué es DNS", "cómo funciona TCP", "explica ping"), NO es exploratoria
+4. Preguntas sobre TUS CAPACIDADES, TUS TEMAS, TUS CONOCIMIENTOS, QUÉ PUEDES HACER, QUÉ MANEJAS son exploratorias
+5. Sé FLEXIBLE: entiende que "qué temas manejas", "qué información tienes", "qué temas puedes enseñar", "qué sabes sobre", "qué temas de X manejas" son TODAS exploratorias
+
+REGLA DE ORO: Si la pregunta es sobre QUÉ TIENES/QUÉ PUEDES/QUÉ MANEJAS (sin especificar un tema concreto), es exploratoria.
+
+Ejemplos de EXPLORATORIAS (marcar como "exploratoria"):
+- "Qué información tienes?"
+- "Qué temas puedes enseñar?"
+- "Qué temas manejas?"
+- "Qué temas de redes manejas?"
+- "Qué sabes?"
+- "Sobre qué temas tienes información?"
+- "Qué puedes explicar?"
+- "Qué información hay disponible?"
+- "Y que otros temas aparte del ping manejas?"
+- "Qué temas de X manejas?" (donde X es un dominio general)
+
+Ejemplos de NO EXPLORATORIAS (marcar como "no_exploratoria"):
+- "Qué es DNS?" (pregunta específica sobre DNS)
+- "Cómo funciona TCP/IP?" (pregunta específica sobre TCP/IP)
+- "Explica qué es un ping" (pregunta específica sobre ping)
+- "Y sobre cables de fibra optica?" (busca información específica sobre fibra óptica)
+- "Qué es un router?" (pregunta específica sobre routers)
+
+Responde SOLO con una palabra: "exploratoria" o "no_exploratoria".
+"""
+            
+            def _sync_exploration_check():
+                exploration_response = client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=[
+                        {"role": "system", "content": "Eres un analizador que determina si una pregunta busca explorar qué información está disponible o busca información específica sobre un tema."},
+                        {"role": "user", "content": exploration_detection_prompt}
+                    ],
+                    temperature=0.0,
+                    max_tokens=20
+                )
+                return exploration_response.choices[0].message.content.strip().lower()
+            
+            response = await asyncio.to_thread(_sync_exploration_check)
+            is_exploration = "exploratoria" in response and "no_exploratoria" not in response
+            logger.info(f"[RAG] Detección de pregunta exploratoria - LLM respuesta: '{response}', es exploratoria: {is_exploration}")
+            return is_exploration
+        except Exception as e:
+            logger.warning(f"[RAG] Error al detectar pregunta exploratoria: {e}. Asumiendo no exploratoria.")
+            return False
     
     async def _execute_query(self, query_text: str, top_k: int = 8, conversation_context: Optional[str] = None):
         """
@@ -375,29 +415,45 @@ Genera una respuesta clara, natural y adaptada a la complejidad de la pregunta u
             return {"answer": "La consulta no puede estar vacía.", "hits": 0, "contexts": []}
         
         try:
-            # Detectar si es una pregunta exploratoria sobre el conocimiento disponible
-            is_exploration = self._is_knowledge_exploration_query(query_text)
+            # Detectar si es una pregunta exploratoria usando LLM (comprensión contextual, no palabras clave)
+            # Esto se hace en paralelo con las búsquedas para no agregar latencia
+            is_exploration_task = self._is_knowledge_exploration_query(query_text, conversation_context)
             
             # Para preguntas exploratorias, usar una búsqueda más amplia
-            search_top_k = top_k * 2 if is_exploration else top_k
+            # Usaremos top_k normal primero, luego ajustaremos si es exploratoria
             
             # OPTIMIZACIÓN: Extraer keywords antes de las búsquedas
             keywords = self._extract_keywords(query_text)
             
-            # OPTIMIZACIÓN: Ejecutar búsqueda densa y dispersa en paralelo usando asyncio.gather()
-            # Esto es más eficiente que ThreadPoolExecutor para operaciones I/O
-            tasks = [self._dense_search(query_text, search_top_k)]
+            # OPTIMIZACIÓN: Ejecutar búsqueda densa, dispersa y detección exploratoria en paralelo
+            tasks = [self._dense_search(query_text, top_k)]
             
             # Agregar búsqueda dispersa solo si hay keywords
             if keywords:
                 tasks.append(self._sparse_search(keywords))
             
-            # Ejecutar ambas búsquedas en paralelo
+            # Agregar detección exploratoria
+            tasks.append(is_exploration_task)
+            
+            # Ejecutar todas las tareas en paralelo
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             # Procesar resultados
             hits = results[0] if not isinstance(results[0], Exception) else []
             keyword_hits = results[1] if len(results) > 1 and not isinstance(results[1], Exception) else []
+            is_exploration = results[-1] if not isinstance(results[-1], Exception) else False
+            
+            # Si es exploratoria y no hay suficientes hits, hacer búsqueda más amplia
+            if is_exploration and len(hits) < 10:
+                logger.info(f"[RAG] Pregunta exploratoria detectada - ampliando búsqueda a top_k={top_k * 2}")
+                expanded_hits = await self._dense_search(query_text, top_k * 2)
+                if expanded_hits:
+                    # Combinar y deduplicar
+                    existing_ids = {h.get('id') for h in hits}
+                    for h in expanded_hits:
+                        if h.get('id') not in existing_ids:
+                            hits.append(h)
+                            existing_ids.add(h.get('id'))
             
             # Manejar excepciones
             if isinstance(results[0], Exception):
@@ -448,14 +504,56 @@ Genera una respuesta clara, natural y adaptada a la complejidad de la pregunta u
                 except Exception as e:
                     logger.error(f"[RAG] Error al verificar colección: {e}")
                 
-                # Si después de la búsqueda alternativa aún no hay hits, retornar mensaje
+                # Si después de la búsqueda alternativa aún no hay hits
                 if not hits:
-                    return {
-                        "answer": "No encontré información específica sobre tu pregunta en los documentos disponibles. Por favor, asegúrate de que tu pregunta esté relacionada con redes, telecomunicaciones o protocolos de red.",
-                        "hits": 0,
-                        "contexts": [],
-                        "source": "no_hits"
-                    }
+                    # Si es una pregunta exploratoria, hacer una búsqueda muy amplia para obtener muestra de temas
+                    if is_exploration:
+                        logger.info(f"[RAG] Pregunta exploratoria sin hits - haciendo búsqueda muy amplia para obtener muestra de temas")
+                        try:
+                            # Hacer búsqueda con un query genérico sobre redes y telecomunicaciones
+                            generic_query = "redes telecomunicaciones protocolos tecnologías"
+                            query_vector = embedding_for_text(generic_query)
+                            broad_hits = self.qdrant_repo.search(query_vector=query_vector, top_k=30)
+                            if broad_hits:
+                                logger.info(f"[RAG] ✅ Búsqueda amplia encontró {len(broad_hits)} resultados para pregunta exploratoria")
+                                hits = broad_hits
+                            else:
+                                # Si aún no hay hits, verificar si hay documentos y usar una muestra aleatoria
+                                collection_info = self.qdrant_repo.get_collection_info()
+                                points_count = collection_info.get('points_count', 0) if isinstance(collection_info, dict) else 0
+                                if points_count > 0:
+                                    logger.info(f"[RAG] Intentando obtener muestra aleatoria de {min(20, points_count)} documentos")
+                                    # Intentar obtener una muestra usando scroll
+                                    try:
+                                        scroll_result = self.qdrant_repo.client.scroll(
+                                            collection_name=self.qdrant_repo.collection_name,
+                                            limit=min(20, points_count),
+                                            with_payload=True
+                                        )
+                                        if scroll_result and hasattr(scroll_result, 'points'):
+                                            hits = [{"payload": p.payload, "id": p.id, "score": 0.5} for p in scroll_result.points[:20]]
+                                            logger.info(f"[RAG] ✅ Obtenida muestra de {len(hits)} documentos para pregunta exploratoria")
+                                    except Exception as scroll_error:
+                                        logger.warning(f"[RAG] Error al hacer scroll: {scroll_error}")
+                        except Exception as e:
+                            logger.error(f"[RAG] Error en búsqueda amplia para pregunta exploratoria: {e}")
+                    
+                    # Si aún no hay hits después de intentos, retornar mensaje apropiado
+                    if not hits:
+                        if is_exploration:
+                            return {
+                                "answer": "No hay documentos disponibles en la base de datos para mostrar los temas disponibles. Por favor, sube documentos PDF relacionados con redes y telecomunicaciones para que pueda responder tus preguntas.",
+                                "hits": 0,
+                                "contexts": [],
+                                "source": "no_documents_exploration"
+                            }
+                        else:
+                            return {
+                                "answer": "No encontré información específica sobre tu pregunta en los documentos disponibles. Por favor, asegúrate de que tu pregunta esté relacionada con redes, telecomunicaciones o protocolos de red.",
+                                "hits": 0,
+                                "contexts": [],
+                                "source": "no_hits"
+                            }
         except Exception as e:
             # Si Qdrant no está disponible o hay error de conexión, retornar error
             error_msg = str(e)
@@ -613,19 +711,25 @@ Responde SOLO con una palabra: "relevante" o "no_relevante".
         else:
             logger.warning(f"[RAG] ⚠️ No hay chunks relevantes disponibles después del filtrado")
         
-        # Si el contexto está vacío después del filtrado, retornar error
-        if not context or not context.strip():
-            logger.error(f"[RAG] ❌ Contexto vacío después del filtrado. Hits totales: {len(hits)}")
-            return {
-                "answer": "No encontré información específica sobre tu pregunta en los documentos disponibles. Por favor, asegúrate de que tu pregunta esté relacionada con redes, telecomunicaciones o protocolos de red.",
-                "hits": len(hits),
-                "contexts": [],
-                "source": "empty_context"
-            }
-
-        # Si es una pregunta exploratoria, usar un prompt especial
+        # Si es una pregunta exploratoria (detectada por LLM, no por palabras clave), usar un prompt especial
+        # IMPORTANTE: Manejar esto ANTES de verificar contexto vacío, porque las preguntas exploratorias
+        # pueden funcionar incluso con contexto limitado o vacío
         if is_exploration:
             # Para preguntas exploratorias, generar un resumen de los temas disponibles
+            # Si no hay contexto suficiente, usar más hits o generar respuesta con contexto mínimo
+            if not context or len(context.strip()) < 100:
+                # Si el contexto es muy pequeño, usar más hits
+                if hits:
+                    logger.info(f"[RAG] Contexto pequeño para pregunta exploratoria - usando más hits ({len(hits)} disponibles)")
+                    # Usar hasta 10 hits para tener más contexto
+                    exploration_hits = hits[:10] if len(hits) > 10 else hits
+                    context = "\n\n".join([h["payload"].get("text", "") for h in exploration_hits])
+                    relevant_hits = exploration_hits
+                else:
+                    # Si no hay hits, el contexto ya está vacío, pero intentaremos generar respuesta igual
+                    logger.warning(f"[RAG] Pregunta exploratoria sin contexto suficiente - generando respuesta con contexto mínimo")
+                    context = "No hay contexto específico disponible, pero puedo ayudarte con temas generales de redes y telecomunicaciones."
+            
             exploration_prompt = f"""
 Eres un asistente experto en redes y telecomunicaciones. El usuario está preguntando qué información o temas tienes disponibles en tu base de conocimiento.
 
@@ -639,7 +743,8 @@ CONTEXTO DE DOCUMENTOS (muestra de los temas disponibles):
 {context}
 
 IMPORTANTE:
-- Solo menciona temas que estén EXPLÍCITAMENTE en el contexto proporcionado
+- Si hay contexto, solo menciona temas que estén EXPLÍCITAMENTE en el contexto proporcionado
+- Si el contexto es limitado o genérico, menciona temas generales de redes y telecomunicaciones que típicamente se cubren (protocolos TCP/IP, DNS, HTTP, herramientas de diagnóstico como ping y traceroute, etc.)
 - Organiza la respuesta de manera clara y fácil de leer
 - Si el contexto menciona protocolos, tecnologías o conceptos específicos, inclúyelos
 - Mantén un tono profesional pero accesible
@@ -662,16 +767,32 @@ Genera una respuesta que muestre qué información y temas tienes disponibles:
                 
                 answer = await asyncio.to_thread(_sync_exploration_response)
                 
+                # Asegurar que siempre haya contextos para RAGAS
+                contexts_list = [h["payload"].get("text", "") for h in relevant_hits] if relevant_hits else []
+                if not contexts_list and context and context.strip() and len(context) > 100:
+                    # Si no hay contextos pero hay contexto, usar el contexto como único contexto
+                    contexts_list = [context[:1000]]  # Limitar tamaño
+                
                 return {
                     "answer": answer,
                     "hits": len(hits),
-                    "contexts": [h["payload"].get("text", "") for h in relevant_hits],
+                    "contexts": contexts_list,
                     "source": "rag_exploration"
                 }
             except Exception as e:
                 logger.error(f"[RAG] Error al generar respuesta exploratoria: {e}")
-                # Fallback a respuesta normal
+                # Fallback a respuesta normal - continuar con el flujo normal
                 pass
+        
+        # Si el contexto está vacío después del filtrado Y no es exploratoria, retornar error
+        if not context or not context.strip():
+            logger.error(f"[RAG] ❌ Contexto vacío después del filtrado. Hits totales: {len(hits)}")
+            return {
+                "answer": "No encontré información específica sobre tu pregunta en los documentos disponibles. Por favor, asegúrate de que tu pregunta esté relacionada con redes, telecomunicaciones o protocolos de red.",
+                "hits": len(hits),
+                "contexts": [],
+                "source": "empty_context"
+            }
         
         # Construir el prompt con contexto de conversación si está disponible
         # El contexto de conversación puede contener acciones, resultados y eventos previos
