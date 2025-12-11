@@ -333,6 +333,30 @@ Genera una respuesta clara, natural y adaptada a la complejidad de la pregunta u
             for h in hits
         )
     
+    def _is_knowledge_exploration_query(self, query_text: str) -> bool:
+        """
+        Detecta si la consulta es una pregunta exploratoria sobre el conocimiento disponible.
+        Estas preguntas requieren una estrategia de búsqueda diferente.
+        """
+        query_lower = query_text.lower()
+        exploration_patterns = [
+            "qué información tienes",
+            "qué temas puedes enseñar",
+            "qué sabes sobre",
+            "qué conocimientos tienes",
+            "qué puedes explicar",
+            "sobre qué temas tienes información",
+            "qué información dispones",
+            "qué temas cubres",
+            "qué puedes enseñar",
+            "qué información hay disponible",
+            "qué temas están disponibles",
+            "qué información contiene",
+            "qué temas abarcas",
+            "qué información posees"
+        ]
+        return any(pattern in query_lower for pattern in exploration_patterns)
+    
     async def _execute_query(self, query_text: str, top_k: int = 8, conversation_context: Optional[str] = None):
         """
         Método interno que ejecuta la consulta RAG real.
@@ -351,12 +375,18 @@ Genera una respuesta clara, natural y adaptada a la complejidad de la pregunta u
             return {"answer": "La consulta no puede estar vacía.", "hits": 0, "contexts": []}
         
         try:
+            # Detectar si es una pregunta exploratoria sobre el conocimiento disponible
+            is_exploration = self._is_knowledge_exploration_query(query_text)
+            
+            # Para preguntas exploratorias, usar una búsqueda más amplia
+            search_top_k = top_k * 2 if is_exploration else top_k
+            
             # OPTIMIZACIÓN: Extraer keywords antes de las búsquedas
             keywords = self._extract_keywords(query_text)
             
             # OPTIMIZACIÓN: Ejecutar búsqueda densa y dispersa en paralelo usando asyncio.gather()
             # Esto es más eficiente que ThreadPoolExecutor para operaciones I/O
-            tasks = [self._dense_search(query_text, top_k)]
+            tasks = [self._dense_search(query_text, search_top_k)]
             
             # Agregar búsqueda dispersa solo si hay keywords
             if keywords:
@@ -593,6 +623,56 @@ Responde SOLO con una palabra: "relevante" o "no_relevante".
                 "source": "empty_context"
             }
 
+        # Si es una pregunta exploratoria, usar un prompt especial
+        if is_exploration:
+            # Para preguntas exploratorias, generar un resumen de los temas disponibles
+            exploration_prompt = f"""
+Eres un asistente experto en redes y telecomunicaciones. El usuario está preguntando qué información o temas tienes disponibles en tu base de conocimiento.
+
+Basándote en el siguiente contexto extraído de los documentos, genera una respuesta que:
+1. Liste los principales temas y conceptos sobre los que tienes información disponible
+2. Sea clara y organizada, agrupando temas relacionados
+3. Mencione conceptos específicos cuando sea relevante
+4. Indique que puedes proporcionar información detallada sobre cualquiera de estos temas
+
+CONTEXTO DE DOCUMENTOS (muestra de los temas disponibles):
+{context}
+
+IMPORTANTE:
+- Solo menciona temas que estén EXPLÍCITAMENTE en el contexto proporcionado
+- Organiza la respuesta de manera clara y fácil de leer
+- Si el contexto menciona protocolos, tecnologías o conceptos específicos, inclúyelos
+- Mantén un tono profesional pero accesible
+- Indica que puedes proporcionar más detalles sobre cualquiera de estos temas si el usuario pregunta
+
+Genera una respuesta que muestre qué información y temas tienes disponibles:
+"""
+            try:
+                def _sync_exploration_response():
+                    exploration_response = client.chat.completions.create(
+                        model=settings.llm_model,
+                        messages=[
+                            {"role": "system", "content": "Eres un asistente experto en redes y telecomunicaciones. Tu función es ayudar a los usuarios a entender qué información y temas están disponibles en tu base de conocimiento."},
+                            {"role": "user", "content": exploration_prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=500
+                    )
+                    return exploration_response.choices[0].message.content.strip()
+                
+                answer = await asyncio.to_thread(_sync_exploration_response)
+                
+                return {
+                    "answer": answer,
+                    "hits": len(hits),
+                    "contexts": [h["payload"].get("text", "") for h in relevant_hits],
+                    "source": "rag_exploration"
+                }
+            except Exception as e:
+                logger.error(f"[RAG] Error al generar respuesta exploratoria: {e}")
+                # Fallback a respuesta normal
+                pass
+        
         # Construir el prompt con contexto de conversación si está disponible
         # El contexto de conversación puede contener acciones, resultados y eventos previos
         context_section = ""

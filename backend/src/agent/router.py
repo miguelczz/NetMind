@@ -82,8 +82,17 @@ RELEVANCE RULES (STEP 1):
 
 TOOL DECISION RULES (STEP 2 - only if relevant):
 1. ANALYZE THE USER REQUEST CAREFULLY: Break down the request into separate parts if it contains multiple questions or tasks.
-2. IMPORTANT: If the user is asking for a follow-up, conclusion, or continuation of a previous conversation (e.g., "conclusión", "resumen", "entonces", "en resumen", "dame más detalles sobre lo anterior"), use RAG tool but be aware it should use conversation context.
-3. UNDERSTAND USER INTENTION FROM CONTEXT: When the user makes a request like "haz uno", "hazlo", "ejecuta uno", "realiza uno", "haz un", "ejecuta un", you must understand what they want to do by analyzing:
+2. UNDERSTAND META-QUESTIONS ABOUT KNOWLEDGE AND CAPABILITIES:
+   - Questions like "qué información tienes", "qué temas puedes enseñar", "qué sabes sobre", "qué conocimientos tienes", "qué puedes explicar", "sobre qué temas tienes información" are asking about the agent's knowledge base and available information
+   - These should ALWAYS use RAG tool with a plan step like "retrieve information about available topics and knowledge in documents" or "query what information is available about [topic]"
+   - The agent should understand these are requests to explore what information exists in the knowledge base, not requests for specific technical operations
+   - Examples:
+     * "Qué información tienes?" → tool: "rag", plan_step: "retrieve information about available topics and knowledge in documents"
+     * "Qué temas puedes enseñar?" → tool: "rag", plan_step: "retrieve information about available educational topics in documents"
+     * "Y sobre cables de fibra optica?" → tool: "rag", plan_step: "retrieve information about fiber optic cables"
+     * "Qué sabes sobre DNS?" → tool: "rag", plan_step: "retrieve information about DNS"
+3. IMPORTANT: If the user is asking for a follow-up, conclusion, or continuation of a previous conversation (e.g., "conclusión", "resumen", "entonces", "en resumen", "dame más detalles sobre lo anterior"), use RAG tool but be aware it should use conversation context.
+4. UNDERSTAND USER INTENTION FROM CONTEXT: When the user makes a request like "haz uno", "hazlo", "ejecuta uno", "realiza uno", "haz un", "ejecuta un", you must understand what they want to do by analyzing:
    - The conversation context: What was discussed in previous messages? What operation or concept was mentioned?
    - The user's intent: What specific action are they asking to perform?
    - The relationship between context and request: If they asked "¿Qué es DNS?" and then say "realiza uno", they likely want to perform a DNS operation. If they asked "¿Qué es un ping?" and then say "realiza uno", they likely want to perform a ping operation.
@@ -97,8 +106,8 @@ TOOL DECISION RULES (STEP 2 - only if relevant):
    
    The key is understanding the user's intent from the conversation flow, not matching keywords.
 
-4. For each part, determine which tool is needed by understanding the user's intent:
-   - RAG tool: for questions about concepts, definitions, explanations, educational content, asking "what is", "que es", "explain", "define", follow-up questions, conclusions, summaries
+5. For each part, determine which tool is needed by understanding the user's intent:
+   - RAG tool: for questions about concepts, definitions, explanations, educational content, asking "what is", "que es", "explain", "define", follow-up questions, conclusions, summaries, questions about available knowledge/information, questions about what topics the agent can teach, exploratory questions about available content
    - IP tool: for network operations like ping, traceroute, IP comparison, IP validation, comparing domains/IPs, network analysis
    - DNS tool: for DNS queries, domain records (A, AAAA, MX, TXT, NS, CNAME), reverse DNS lookup, DNS comparison, SPF/DMARC verification, domain information
    
@@ -110,25 +119,31 @@ TOOL DECISION RULES (STEP 2 - only if relevant):
    - For DMARC verification: if user asks "verificar DMARC", "check DMARC", use plan step: "check DMARC for [domain]"
    - For complete domain info: if user asks "información del dominio", "info del dominio", use plan step: "get domain info for [domain]"
 
-5. Generate plan_steps that are SPECIFIC and CLEAR. Each step should:
+6. Generate plan_steps that are SPECIFIC and CLEAR. Each step should:
    - Be a single, executable action
    - Clearly indicate what information or operation is needed
    - Include relevant details (domains, IPs, concepts) mentioned in the user request
    - Be self-contained so the agent can determine which tool to use
 
-6. IMPORTANT: If the user asks multiple things requiring different tools, create MULTIPLE steps:
+7. IMPORTANT: If the user asks multiple things requiring different tools, create MULTIPLE steps:
    - Example: "Que es un ping? y compara IPs de facebook y google" 
      → plan_steps: ["retrieve information about what ping is", "compare IP addresses of facebook.com and google.com"]
 
-7. For single questions, use ONE step:
+8. For single questions, use ONE step:
    - "Que es un ping?" → ["retrieve information about what ping is"]
    - "Compara IPs de facebook y google" → ["compare IP addresses of facebook.com and google.com"]
 
-8. NEVER use vague steps like "ensure clarity", "elaborate explanation", "improve response" - these are not executable actions
+9. NEVER use vague steps like "ensure clarity", "elaborate explanation", "improve response" - these are not executable actions
 
-9. Each step should be specific enough that the agent can automatically determine which tool (RAG, IP, or DNS) to use
+10. Each step should be specific enough that the agent can automatically determine which tool (RAG, IP, or DNS) to use
 
-10. The "tool" field should be the PRIMARY tool if multiple are needed, or the only tool if one is needed.
+11. The "tool" field should be the PRIMARY tool if multiple are needed, or the only tool if one is needed.
+
+12. CONTEXTUAL UNDERSTANDING: When the user asks questions that seem vague but are actually asking about available information or knowledge:
+    - "Qué información tienes?" → Understand as: "What information/knowledge do you have in your documents?"
+    - "Qué temas puedes enseñar?" → Understand as: "What topics can you teach based on your knowledge base?"
+    - "Y sobre [topic]?" → Understand as: "What information do you have about [topic]?"
+    - These should trigger RAG tool to search the knowledge base, even if the question doesn't explicitly mention "what is" or "explain"
 
 OUTPUT FORMAT:
 Respond with a valid JSON containing these keys:
