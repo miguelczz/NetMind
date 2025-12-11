@@ -530,8 +530,9 @@ Responde SOLO con una palabra: "exploratoria" o "no_exploratoria".
                                             limit=min(20, points_count),
                                             with_payload=True
                                         )
-                                        if scroll_result and hasattr(scroll_result, 'points'):
-                                            hits = [{"payload": p.payload, "id": p.id, "score": 0.5} for p in scroll_result.points[:20]]
+                                        # scroll() retorna una tupla (points, next_page_offset)
+                                        if scroll_result and len(scroll_result) > 0 and scroll_result[0]:
+                                            hits = [{"payload": p.payload, "id": p.id, "score": 0.5} for p in scroll_result[0][:20]]
                                             logger.info(f"[RAG] ✅ Obtenida muestra de {len(hits)} documentos para pregunta exploratoria")
                                     except Exception as scroll_error:
                                         logger.warning(f"[RAG] Error al hacer scroll: {scroll_error}")
