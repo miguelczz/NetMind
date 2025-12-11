@@ -339,43 +339,41 @@ Genera una respuesta clara, natural y adaptada a la complejidad de la pregunta u
         NO usa palabras clave, solo comprensión contextual del LLM.
         """
         try:
-            exploration_detection_prompt = f"""
-Analiza la siguiente pregunta del usuario y determina si está preguntando sobre QUÉ INFORMACIÓN, TEMAS o CONOCIMIENTOS tienes disponibles en tu base de conocimiento.
-
-Pregunta del usuario: "{query_text}"
-
-{("Contexto de conversación previa:\n" + conversation_context[:500] + "\n\n") if conversation_context else ""}
-
-INSTRUCCIONES CRÍTICAS:
-1. Analiza la INTENCIÓN de la pregunta, NO las palabras exactas
-2. Si la pregunta busca EXPLORAR qué información/temas/conocimientos están disponibles (sin pedir información específica sobre un tema), marca como "exploratoria"
-3. Si la pregunta busca información ESPECÍFICA sobre un tema concreto (ej: "qué es DNS", "cómo funciona TCP", "explica ping"), NO es exploratoria
-4. Preguntas sobre TUS CAPACIDADES, TUS TEMAS, TUS CONOCIMIENTOS, QUÉ PUEDES HACER, QUÉ MANEJAS son exploratorias
-5. Sé FLEXIBLE: entiende que "qué temas manejas", "qué información tienes", "qué temas puedes enseñar", "qué sabes sobre", "qué temas de X manejas" son TODAS exploratorias
-
-REGLA DE ORO: Si la pregunta es sobre QUÉ TIENES/QUÉ PUEDES/QUÉ MANEJAS (sin especificar un tema concreto), es exploratoria.
-
-Ejemplos de EXPLORATORIAS (marcar como "exploratoria"):
-- "Qué información tienes?"
-- "Qué temas puedes enseñar?"
-- "Qué temas manejas?"
-- "Qué temas de redes manejas?"
-- "Qué sabes?"
-- "Sobre qué temas tienes información?"
-- "Qué puedes explicar?"
-- "Qué información hay disponible?"
-- "Y que otros temas aparte del ping manejas?"
-- "Qué temas de X manejas?" (donde X es un dominio general)
-
-Ejemplos de NO EXPLORATORIAS (marcar como "no_exploratoria"):
-- "Qué es DNS?" (pregunta específica sobre DNS)
-- "Cómo funciona TCP/IP?" (pregunta específica sobre TCP/IP)
-- "Explica qué es un ping" (pregunta específica sobre ping)
-- "Y sobre cables de fibra optica?" (busca información específica sobre fibra óptica)
-- "Qué es un router?" (pregunta específica sobre routers)
-
-Responde SOLO con una palabra: "exploratoria" o "no_exploratoria".
-"""
+            # Construir contexto para el prompt (sin usar backslash en f-string)
+            context_part = ""
+            if conversation_context:
+                context_part = "\n\nContexto de conversación previa:\n" + conversation_context[:500]
+            
+            exploration_detection_prompt = (
+                "Analiza la siguiente pregunta del usuario y determina si está preguntando sobre QUÉ INFORMACIÓN, TEMAS o CONOCIMIENTOS tienes disponibles en tu base de conocimiento.\n\n"
+                f"Pregunta del usuario: \"{query_text}\"\n"
+                + context_part +
+                "\n\nINSTRUCCIONES CRÍTICAS:\n"
+                "1. Analiza la INTENCIÓN de la pregunta, NO las palabras exactas\n"
+                "2. Si la pregunta busca EXPLORAR qué información/temas/conocimientos están disponibles (sin pedir información específica sobre un tema), marca como \"exploratoria\"\n"
+                "3. Si la pregunta busca información ESPECÍFICA sobre un tema concreto (ej: \"qué es DNS\", \"cómo funciona TCP\", \"explica ping\"), NO es exploratoria\n"
+                "4. Preguntas sobre TUS CAPACIDADES, TUS TEMAS, TUS CONOCIMIENTOS, QUÉ PUEDES HACER, QUÉ MANEJAS son exploratorias\n"
+                "5. Sé FLEXIBLE: entiende que \"qué temas manejas\", \"qué información tienes\", \"qué temas puedes enseñar\", \"qué sabes sobre\", \"qué temas de X manejas\" son TODAS exploratorias\n\n"
+                "REGLA DE ORO: Si la pregunta es sobre QUÉ TIENES/QUÉ PUEDES/QUÉ MANEJAS (sin especificar un tema concreto), es exploratoria.\n\n"
+                "Ejemplos de EXPLORATORIAS (marcar como \"exploratoria\"):\n"
+                "- \"Qué información tienes?\"\n"
+                "- \"Qué temas puedes enseñar?\"\n"
+                "- \"Qué temas manejas?\"\n"
+                "- \"Qué temas de redes manejas?\"\n"
+                "- \"Qué sabes?\"\n"
+                "- \"Sobre qué temas tienes información?\"\n"
+                "- \"Qué puedes explicar?\"\n"
+                "- \"Qué información hay disponible?\"\n"
+                "- \"Y que otros temas aparte del ping manejas?\"\n"
+                "- \"Qué temas de X manejas?\" (donde X es un dominio general)\n\n"
+                "Ejemplos de NO EXPLORATORIAS (marcar como \"no_exploratoria\"):\n"
+                "- \"Qué es DNS?\" (pregunta específica sobre DNS)\n"
+                "- \"Cómo funciona TCP/IP?\" (pregunta específica sobre TCP/IP)\n"
+                "- \"Explica qué es un ping\" (pregunta específica sobre ping)\n"
+                "- \"Y sobre cables de fibra optica?\" (busca información específica sobre fibra óptica)\n"
+                "- \"Qué es un router?\" (pregunta específica sobre routers)\n\n"
+                "Responde SOLO con una palabra: \"exploratoria\" o \"no_exploratoria\"."
+            )
             
             def _sync_exploration_check():
                 exploration_response = client.chat.completions.create(
@@ -418,9 +416,6 @@ Responde SOLO con una palabra: "exploratoria" o "no_exploratoria".
             # Detectar si es una pregunta exploratoria usando LLM (comprensión contextual, no palabras clave)
             # Esto se hace en paralelo con las búsquedas para no agregar latencia
             is_exploration_task = self._is_knowledge_exploration_query(query_text, conversation_context)
-            
-            # Para preguntas exploratorias, usar una búsqueda más amplia
-            # Usaremos top_k normal primero, luego ajustaremos si es exploratoria
             
             # OPTIMIZACIÓN: Extraer keywords antes de las búsquedas
             keywords = self._extract_keywords(query_text)
@@ -730,29 +725,28 @@ Responde SOLO con una palabra: "relevante" o "no_relevante".
                     # Si no hay hits, el contexto ya está vacío, pero intentaremos generar respuesta igual
                     logger.warning(f"[RAG] Pregunta exploratoria sin contexto suficiente - generando respuesta con contexto mínimo")
                     context = "No hay contexto específico disponible, pero puedo ayudarte con temas generales de redes y telecomunicaciones."
+            # Para preguntas exploratorias, generar un resumen de los temas disponibles
+            # Construir prompt sin usar backslash en f-string
+            context_part = context if context and context.strip() else "No hay contexto específico disponible, pero puedo ayudarte con temas generales de redes y telecomunicaciones."
             
-            exploration_prompt = f"""
-Eres un asistente experto en redes y telecomunicaciones. El usuario está preguntando qué información o temas tienes disponibles en tu base de conocimiento.
-
-Basándote en el siguiente contexto extraído de los documentos, genera una respuesta que:
-1. Liste los principales temas y conceptos sobre los que tienes información disponible
-2. Sea clara y organizada, agrupando temas relacionados
-3. Mencione conceptos específicos cuando sea relevante
-4. Indique que puedes proporcionar información detallada sobre cualquiera de estos temas
-
-CONTEXTO DE DOCUMENTOS (muestra de los temas disponibles):
-{context}
-
-IMPORTANTE:
-- Si hay contexto, solo menciona temas que estén EXPLÍCITAMENTE en el contexto proporcionado
-- Si el contexto es limitado o genérico, menciona temas generales de redes y telecomunicaciones que típicamente se cubren (protocolos TCP/IP, DNS, HTTP, herramientas de diagnóstico como ping y traceroute, etc.)
-- Organiza la respuesta de manera clara y fácil de leer
-- Si el contexto menciona protocolos, tecnologías o conceptos específicos, inclúyelos
-- Mantén un tono profesional pero accesible
-- Indica que puedes proporcionar más detalles sobre cualquiera de estos temas si el usuario pregunta
-
-Genera una respuesta que muestre qué información y temas tienes disponibles:
-"""
+            exploration_prompt = (
+                "Eres un asistente experto en redes y telecomunicaciones. El usuario está preguntando qué información o temas tienes disponibles en tu base de conocimiento.\n\n"
+                "Basándote en el siguiente contexto extraído de los documentos, genera una respuesta que:\n"
+                "1. Liste los principales temas y conceptos sobre los que tienes información disponible\n"
+                "2. Sea clara y organizada, agrupando temas relacionados\n"
+                "3. Mencione conceptos específicos cuando sea relevante\n"
+                "4. Indique que puedes proporcionar información detallada sobre cualquiera de estos temas\n\n"
+                "CONTEXTO DE DOCUMENTOS (muestra de los temas disponibles):\n"
+                + context_part +
+                "\n\nIMPORTANTE:\n"
+                "- Si hay contexto, solo menciona temas que estén EXPLÍCITAMENTE en el contexto proporcionado\n"
+                "- Si el contexto es limitado o genérico, menciona temas generales de redes y telecomunicaciones que típicamente se cubren (protocolos TCP/IP, DNS, HTTP, herramientas de diagnóstico como ping y traceroute, etc.)\n"
+                "- Organiza la respuesta de manera clara y fácil de leer\n"
+                "- Si el contexto menciona protocolos, tecnologías o conceptos específicos, inclúyelos\n"
+                "- Mantén un tono profesional pero accesible\n"
+                "- Indica que puedes proporcionar más detalles sobre cualquiera de estos temas si el usuario pregunta\n\n"
+                "Genera una respuesta que muestre qué información y temas tienes disponibles:"
+            )
             try:
                 def _sync_exploration_response():
                     exploration_response = client.chat.completions.create(
