@@ -1101,14 +1101,15 @@ Responde SOLO con una palabra: "simple", "moderada" o "compleja".
                 f"Respuesta del RAG:\n{combined_raw}\n\n"
                 "INSTRUCCIONES:\n"
                 "- FIDELIDAD TOTAL: Usa SOLO la información de la respuesta RAG. NO inventes, NO agregues conocimiento general.\n"
-                "- LENGUAJE NATURAL: Responde como un experto explicando de manera clara y comprensible.\n"
                 f"- LONGITUD ADAPTATIVA: {length_guidance}\n"
+                "- LENGUAJE NATURAL: Responde como un experto explicando de manera clara y comprensible.\n"
+                "- FORMATO ESTÉTICO (MUY IMPORTANTE):\n"
+                "  * Usa **negrita** para IPs, dominios y valores cortos. Ej: **8.8.8.8**, **google.com**.\n"
+                "  * NO USES backticks (`) ni bloques de código (```) para valores individuales.\n"
+                "  * Evita tablas complejas. Prefiere listas con viñetas para enumerar datos.\n"
                 "- ESTRUCTURA: Organiza la información de forma lógica y fácil de leer.\n"
-                "- CONTEXTO APROPIADO: Solo si la pregunta realmente lo requiere, proporciona una breve introducción (1 oración máximo).\n"
-                "- NO copies párrafos completos, parafrasea de manera natural\n"
-                "- Mantén un tono profesional pero accesible\n"
-                "- Para preguntas simples, ve directo al punto sin rodeos\n\n"
-                "Genera una respuesta clara, natural y CONCISA usando SOLO la información proporcionada:"
+                "- NO copies párrafos completos, parafrasea de manera natural\n\n"
+                "Genera una respuesta clara y con formato limpio (sin bloques innecesarios):"
             )
             
             try:

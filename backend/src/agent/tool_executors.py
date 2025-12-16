@@ -142,6 +142,22 @@ def execute_ip_tool(step: str, prompt: str, messages: List[AnyMessage]) -> Dict[
 def _execute_ping(hosts: List[str], search_text: str, messages: List[AnyMessage] = None) -> Dict[str, Any]:
     """Ejecuta operación de ping."""
     if hosts:
+        # Si hay múltiples hosts, verificar si el usuario quiere una comparación
+        if len(hosts) >= 2:
+            # Detectar palabras clave de comparación
+            search_lower = search_text.lower()
+            comparison_keywords = [
+                "compara", "comparar", "comparando", "vs", "versus", 
+                "diferencia", "diferencias", "frente a", "con el", "con google",
+                "con facebook", "con"
+            ]
+            
+            # Si hay palabras de comparación, redirigir a la función de comparación
+            if any(keyword in search_lower for keyword in comparison_keywords):
+                logger.info(f"[Ping] Detectadas {len(hosts)} hosts con palabras de comparación - redirigiendo a _execute_compare")
+                return _execute_compare(hosts, search_text, messages)
+        
+        # Si no es comparación, ejecutar pings individuales
         ping_results = [ip_tool.ping(host, count=4) for host in hosts]
         if len(ping_results) > 1:
             return {
@@ -154,6 +170,21 @@ def _execute_ping(hosts: List[str], search_text: str, messages: List[AnyMessage]
     # Intentar extraer dominios (incluyendo nombres de servicios)
     domains = extract_domains_from_text(search_text)
     if domains:
+        # Si hay múltiples dominios, verificar si el usuario quiere una comparación
+        if len(domains) >= 2:
+            # Detectar palabras clave de comparación
+            search_lower = search_text.lower()
+            comparison_keywords = [
+                "compara", "comparar", "comparando", "vs", "versus", 
+                "diferencia", "diferencias", "frente a", "con el", "con"
+            ]
+            
+            # Si hay palabras de comparación, redirigir a la función de comparación
+            if any(keyword in search_lower for keyword in comparison_keywords):
+                logger.info(f"[Ping] Detectados {len(domains)} dominios con palabras de comparación - redirigiendo a _execute_compare")
+                return _execute_compare(domains, search_text, messages)
+        
+        # Si no es comparación, ejecutar pings individuales
         ping_results = [ip_tool.ping(domain, count=4) for domain in domains]
         if len(ping_results) > 1:
             return {

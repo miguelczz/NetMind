@@ -587,53 +587,137 @@ class DNSTool:
         if "error" in result:
             return f"Error DNS: {result['error']}"
         
-        # Formatear get_all_records
+        # Formatear get_all_records (cuando records es un diccionario de tipos)
+        if "records" in result and isinstance(result.get("records"), dict):
+            domain = result.get("domain", "N/A")
+            md = [f"### 📇 Registros DNS: {domain}", ""]
+            
+            records_dict = result["records"]
+            priority_order = ["A", "AAAA", "MX", "NS", "CNAME", "TXT", "PTR"]
+            
+            # Descripciones amigables
+            type_names = {
+                "A": "🌐 IPv4",
+                "AAAA": "🌐 IPv6",
+                "MX": "📧 Servidores de Correo",
+                "NS": "🔧 Servidores de Nombres",
+                "CNAME": "🔗 Alias",
+                "TXT": "📝 Registros de Texto",
+                "PTR": "🔄 Reverso"
+            }
+            
+            found_any = False
+            for r_type in priority_order:
+                if r_type in records_dict and records_dict[r_type]:
+                    found_any = True
+                    recs = records_dict[r_type]
+                    type_label = type_names.get(r_type, r_type)
+                    md.append(f"**{type_label}**")
+                    md.append("")
+                    
+                    if r_type == "MX":
+                        # Tabla limpia para MX
+                        md.append("| Prioridad | Servidor |")
+                        md.append("| :---: | :--- |")
+                        for r in recs:
+                            if isinstance(r, dict):
+                                prio = r.get('priority', '-')
+                                exch = r.get('exchange', 'N/A')
+                                md.append(f"| **{prio}** | **{exch}** |")
+                            else:
+                                md.append(f"| - | **{r}** |")
+                    elif r_type == "TXT":
+                        # TXT puede ser largo, usar blockquote sin backticks
+                        for r in recs:
+                            truncated = str(r)[:150] + ('...' if len(str(r)) > 150 else '')
+                            md.append(f"> {truncated}")
+                    elif r_type in ["A", "AAAA"]:
+                        # Tabla para IPs cuando hay múltiples
+                        if len(recs) > 1:
+                            ip_label = "Dirección IPv4" if r_type == "A" else "Dirección IPv6"
+                            md.append(f"| {ip_label} |")
+                            md.append("| :--- |")
+                            for r in recs:
+                                md.append(f"| **{r}** |")
+                        else:
+                            # Una sola IP, mostrar simple
+                            md.append(f"• **{recs[0]}**")
+                    elif r_type == "NS":
+                        # Tabla para servidores de nombres
+                        if len(recs) > 1:
+                            md.append("| Servidor de Nombres |")
+                            md.append("| :--- |")
+                            for r in recs:
+                                md.append(f"| **{r}** |")
+                        else:
+                            # Un solo servidor, mostrar simple
+                            md.append(f"• **{recs[0]}**")
+                    else:
+                        # Lista simple para otros tipos (CNAME, PTR, etc.)
+                        for r in recs:
+                            md.append(f"• **{r}**")
+                    
+                    md.append("")
+            
+            if not found_any:
+                md.append("> *No se encontraron registros públicos para este dominio.*")
+            
+            return "\n".join(md)
+
+        # Formatear get_all_records (Legacy text summary fallback)
         if "summary_text" in result:
             return result["summary_text"]
         
-        # Formatear query simple
+        # Formatear query simple (registros = lista)
         if "records" in result and "domain" in result:
             domain = result["domain"]
             record_type = result.get("type", "A")
             records = result["records"]
             
-            md = [f"### 📇 Registros {record_type} para `{domain}`"]
+            md = [f"### 📇 Consulta DNS: {domain} ({record_type})"]
             
             descriptions = {
-                "MX": "Los registros **MX (Mail Exchange)** definen los servidores de correo que reciben emails.",
-                "TXT": "Los registros **TXT** contienen información de texto (verificación, SPF, etc.).",
-                "NS": "Los registros **NS (Name Server)** definen los servidores autoritativos.",
-                "A": "Los registros **A (IPv4)** mapean el dominio a direcciones IPv4.",
-                "AAAA": "Los registros **AAAA (IPv6)** mapean el dominio a direcciones IPv6.",
-                "CNAME": "Los registros **CNAME** crean un alias hacia otro dominio."
+                "MX": "_Servidores de Correo_",
+                "TXT": "_Información de Texto_",
+                "NS": "_Servidores de Nombres_",
+                "A": "_Dirección IPv4_",
+                "AAAA": "_Dirección IPv6_",
+                "CNAME": "_Alias Canónico_"
             }
             
             if record_type in descriptions:
-                md.append(f"_{descriptions[record_type]}_")
-            
-            md.append("")
+                md.append(descriptions[record_type])
+                md.append("")
             
             if not records:
                  md.append("**No se encontraron registros.**")
             else:
                 if record_type == "MX":
-                     md.append("| Prioridad | Servidor (Exchange) |")
+                     md.append("| Prioridad | Servidor |")
                      md.append("| :---: | :--- |")
                      for record in records:
                         if isinstance(record, dict):
-                            md.append(f"| {record.get('priority', 'N/A')} | `{record.get('exchange', 'N/A')}` |")
+                            md.append(f"| **{record.get('priority', 'N/A')}** | **{record.get('exchange', 'N/A')}** |")
                         else:
-                             md.append(f"| - | `{record}` |")
+                             md.append(f"| - | **{record}** |")
                 
-                elif record_type in ["A", "AAAA", "NS", "CNAME"]:
-                    md.append("| Registro |")
-                    md.append("| :--- |")
-                    for record in records:
-                        md.append(f"| `{record}` |")
-                
-                else: # TXT y otros
-                    for record in records:
-                         md.append(f"- `{record}`")
+                else:
+                    # Usar tablas para múltiples valores de A, AAAA, NS
+                    if record_type in ["A", "AAAA"] and len(records) > 1:
+                        ip_label = "Dirección IPv4" if record_type == "A" else "Dirección IPv6"
+                        md.append(f"| {ip_label} |")
+                        md.append("| :--- |")
+                        for record in records:
+                            md.append(f"| **{record}** |")
+                    elif record_type == "NS" and len(records) > 1:
+                        md.append("| Servidor de Nombres |")
+                        md.append("| :--- |")
+                        for record in records:
+                            md.append(f"| **{record}** |")
+                    else:
+                        # Lista simple para un solo valor o tipos como CNAME, TXT
+                        for record in records:
+                            md.append(f"• **{record}**")
 
             return "\n".join(md)
         

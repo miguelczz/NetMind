@@ -32,7 +32,27 @@ def detect_operation_type(step: str, prompt: str, conversation_context: Optional
     combined_text = f"{step_lower} {prompt_lower} {context_lower}"
     
     # Detectar comparación (más específico primero)
-    if any(keyword in combined_text for keyword in ["compare", "comparar", "comparison", "comparar", "diferencias", "differences", "contrast"]):
+    # Incluir variaciones del verbo comparar y patrones comunes
+    compare_keywords = [
+        "compare", "compara", "comparar", "comparando", "comparison", "comparación",
+        "diferencias", "differences", "contrast", "contraste",
+        "vs", "versus", "frente a",
+        # Patrones que indican comparación entre dos elementos
+        "ping de", "latencia de"  # Cuando se menciona junto con "con" o "y"
+    ]
+    
+    # Detectar patrones de comparación (ej: "ping de X con Y", "X vs Y")
+    has_compare_keyword = any(keyword in combined_text for keyword in compare_keywords)
+    has_comparison_pattern = (
+        (" con " in combined_text or " y " in combined_text) and 
+        (combined_text.count(".com") >= 2 or combined_text.count(".") >= 4)  # Múltiples dominios
+    )
+    
+    if has_compare_keyword and has_comparison_pattern:
+        return "compare"
+    
+    # También detectar si hay palabras clave explícitas de comparación
+    if any(keyword in combined_text for keyword in ["compare", "compara", "comparar", "comparando", "comparison", "comparación", "vs", "versus", "diferencias", "differences"]):
         return "compare"
     
     # Detectar traceroute

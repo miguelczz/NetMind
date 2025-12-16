@@ -405,7 +405,7 @@ class IPTool:
             # IP Resuelta
             rip1 = r['resolved_ip1'] if r['resolved_ip1'] else "❌"
             rip2 = r['resolved_ip2'] if r['resolved_ip2'] else "❌"
-            comparison_parts.append(f"| **IP** | `{rip1}` | `{rip2}` | - |")
+            comparison_parts.append(f"| **IP** | **{rip1}** | **{rip2}** | - |")
             
             # Latencia AVG
             if avg1 is not None and avg2 is not None:
@@ -441,8 +441,9 @@ class IPTool:
             
             comparison_parts.append("")
             
-            # Conclusiones y análisis detallado
-            comparison_parts.append(f"#### 📊 Análisis")
+            # Conclusiones y análisis detallado MEJORADO
+            comparison_parts.append(f"**Análisis Detallado**")
+            comparison_parts.append("")
             
             if avg1 is not None and avg2 is not None:
                 difference = abs(avg1 - avg2)
@@ -451,35 +452,126 @@ class IPTool:
                 if avg1 < avg2:
                     faster_host = ip1
                     faster_avg = avg1
+                    slower_host = ip2
+                    slower_avg = avg2
                 else:
                     faster_host = ip2
                     faster_avg = avg2
+                    slower_host = ip1
+                    slower_avg = avg1
                 
-                # Recomendación basada en datos
-                recommendation = ""
+                # 1. Comparación de velocidad
+                comparison_parts.append(f"**🏆 Ganador en Latencia: {faster_host}**")
+                comparison_parts.append("")  # Línea vacía después del encabezado
                 if difference < 5:
-                     recommendation = "La diferencia es insignificante. Ambos ofrecen rendimiento similar."
+                    comparison_parts.append(f"• Diferencia: {difference:.2f}ms ({percentage_diff:.1f}%) - **Insignificante**, ambos ofrecen rendimiento similar.")
                 elif percentage_diff < 20:
-                     recommendation = f"**{faster_host}** es ligeramente más rápido, pero no es crítico."
+                    comparison_parts.append(f"• Diferencia: {difference:.2f}ms ({percentage_diff:.1f}%) - **{faster_host}** es ligeramente más rápido, pero no es crítico.")
                 else:
-                     recommendation = f"**{faster_host}** es claramente superior para latencia."
-
-                comparison_parts.append(f"* **Ganador:** {faster_host} es un **{percentage_diff:.1f}%** más rápido.")
+                    comparison_parts.append(f"• Diferencia: {difference:.2f}ms ({percentage_diff:.1f}%) - **{faster_host}** es claramente superior.")
+                comparison_parts.append("")
                 
-                # Estabilidad
+                # 2. Análisis individual de cada host
+                comparison_parts.append(f"**Análisis de {ip1}:**")
+                comparison_parts.append("")  # Línea vacía después del encabezado
+                
+                # Calidad de latencia para ip1
+                if avg1 < 20:
+                    comparison_parts.append(f"**• Latencia excelente** ({avg1:.2f}ms): Ideal para aplicaciones en tiempo real.")
+                elif avg1 < 50:
+                    comparison_parts.append(f"**• Latencia muy buena** ({avg1:.2f}ms): Adecuada para web y streaming.")
+                elif avg1 < 100:
+                    comparison_parts.append(f"**• Latencia aceptable** ({avg1:.2f}ms): Suficiente para navegación general.")
+                elif avg1 < 200:
+                    comparison_parts.append(f"**• Latencia moderada** ({avg1:.2f}ms): Puede afectar aplicaciones en tiempo real.")
+                else:
+                    comparison_parts.append(f"**• Latencia alta** ({avg1:.2f}ms): Puede causar retrasos notables.")
+                    
+                comparison_parts.append("")
+                
+                # Estabilidad para ip1
                 var1 = (r['ping1'].get('max_time', avg1) - r['ping1'].get('min_time', avg1)) if r['ping1'] else 0
+                if var1 < 5:
+                    comparison_parts.append(f"**• Conexión muy estable** (jitter: {var1:.2f}ms).")
+                elif var1 < 20:
+                    comparison_parts.append(f"**• Conexión estable** (jitter: {var1:.2f}ms).")
+                else:
+                    comparison_parts.append(f"**• Conexión variable** (jitter: {var1:.2f}ms) - puede afectar aplicaciones sensibles.")
+                
+                comparison_parts.append("")
+                
+                # Pérdida de paquetes para ip1
+                loss1 = r['ping1'].get('packet_loss', 0) if r['ping1'] else 0
+                if loss1 == 0:
+                    comparison_parts.append(f"• **Sin pérdida de paquetes** - Conexión confiable al 100%.")
+                elif loss1 < 5:
+                    comparison_parts.append(f"• Pérdida mínima ({loss1:.1f}%) - Generalmente confiable.")
+                else:
+                    comparison_parts.append(f"• Pérdida significativa ({loss1:.1f}%) - Problemas detectados.")
+                
+                comparison_parts.append("")
+                comparison_parts.append(f"**Análisis de {ip2}:**")
+                comparison_parts.append("")  # Línea vacía después del encabezado
+                
+                # Calidad de latencia para ip2
+                if avg2 < 20:
+                    comparison_parts.append(f"**• Latencia excelente** ({avg2:.2f}ms): Ideal para aplicaciones en tiempo real.")
+                elif avg2 < 50:
+                    comparison_parts.append(f"**• Latencia muy buena** ({avg2:.2f}ms): Adecuada para web y streaming.")
+                elif avg2 < 100:
+                    comparison_parts.append(f"**• Latencia aceptable** ({avg2:.2f}ms): Suficiente para navegación general.")
+                elif avg2 < 200:
+                    comparison_parts.append(f"**• Latencia moderada** ({avg2:.2f}ms): Puede afectar aplicaciones en tiempo real.")
+                else:
+                    comparison_parts.append(f"**• Latencia alta** ({avg2:.2f}ms): Puede causar retrasos notables.")
+                    
+                comparison_parts.append("")
+                
+                # Estabilidad para ip2
                 var2 = (r['ping2'].get('max_time', avg2) - r['ping2'].get('min_time', avg2)) if r['ping2'] else 0
+                if var2 < 5:
+                    comparison_parts.append(f"**• Conexión muy estable** (jitter: {var2:.2f}ms).")
+                elif var2 < 20:
+                    comparison_parts.append(f"**• Conexión estable** (jitter: {var2:.2f}ms).")
+                else:
+                    comparison_parts.append(f"**• Conexión variable** (jitter: {var2:.2f}ms) - puede afectar aplicaciones sensibles.")
+                    
+                comparison_parts.append("")
                 
-                stability_msg = "Similar"
-                if abs(var1 - var2) >= 5:
-                    stable_host = ip1 if var1 < var2 else ip2
-                    stability_msg = f"{stable_host} es más estable"
+                # Pérdida de paquetes para ip2
+                loss2 = r['ping2'].get('packet_loss', 0) if r['ping2'] else 0
+                if loss2 == 0:
+                    comparison_parts.append(f"**• Sin pérdida de paquetes** - Conexión confiable al 100%.")
+                elif loss2 < 5:
+                    comparison_parts.append(f"**• Pérdida mínima ({loss2:.1f}%) - Generalmente confiable.")
+                else:
+                    comparison_parts.append(f"**• Pérdida significativa ({loss2:.1f}%) - Problemas detectados.")
                 
-                comparison_parts.append(f"* **Estabilidad:** {stability_msg}.")
-                comparison_parts.append(f"* **Conclusión:** {recommendation}")
+                comparison_parts.append("")
+                
+                # 3. Recomendación final
+                comparison_parts.append("**Conclusión:**")
+                comparison_parts.append("")  # Línea vacía después del encabezado
+                
+                # Determinar el mejor host considerando latencia y estabilidad
+                if difference < 5 and abs(var1 - var2) < 5:
+                    comparison_parts.append(f"**• Ambos hosts ofrecen rendimiento prácticamente idéntico. Puedes usar cualquiera.")
+                elif faster_avg < 50 and var1 < var2 and faster_host == ip1:
+                    comparison_parts.append(f"**• {faster_host}**: Mejor latencia ({faster_avg:.2f}ms) y más estable (jitter: {var1:.2f}ms).")
+                elif faster_avg < 50 and var2 < var1 and faster_host == ip2:
+                    comparison_parts.append(f"**• {faster_host}**: Mejor latencia ({faster_avg:.2f}ms) y más estable (jitter: {var2:.2f}ms).")
+                elif var1 < var2 and abs(difference) < 20:
+                    comparison_parts.append(f"**• {ip1}**: Aunque {faster_host} es más rápido, {ip1} es más estable (jitter: {var1:.2f}ms vs {var2:.2f}ms).")
+                elif var2 < var1 and abs(difference) < 20:
+                    comparison_parts.append(f"**• {ip2}**: Aunque {faster_host} es más rápido, {ip2} es más estable (jitter: {var2:.2f}ms vs {var2:.2f}ms).")
+                else:
+                    comparison_parts.append(f"**• {faster_host}**: Ofrece mejor latencia ({faster_avg:.2f}ms vs {slower_avg:.2f}ms).")
+            
+            comparison_parts.append("")
             
             if r["network_info"]:
-                 comparison_parts.append(f"* **Red:** {r['network_info']}")
+                 comparison_parts.append(f"**• Topología de red:** {r['network_info']}")
+
             
             r["comparison"] = "\n".join(comparison_parts)
             r["summary"] = f"Comparación completa entre {ip1} y {ip2} con análisis detallado de latencia y conclusiones."
@@ -641,54 +733,120 @@ class IPTool:
         # Formatear ping
         if result.get("type") == "ping" or ("ping" in str(result).lower() and "stdout" in result):
             host = result.get("host", "N/A")
-            ip_str = f" (`{result.get('resolved_ip')}`)" if result.get('resolved_ip') and result.get('resolved_ip') != host else ""
+            ip_str = f" (**{result.get('resolved_ip')}**)" if result.get('resolved_ip') and result.get('resolved_ip') != host else ""
             
             # Determinar estado
             success = result.get("success", False)
             status_icon = "✅" if success else "❌"
             status_text = "Exitoso" if success else "Fallido"
             
-            # Métricas
-            avg = f"{result.get('avg_time', 0):.2f} ms" if result.get('avg_time') is not None else "N/A"
-            min_t = f"{result.get('min_time', 0):.2f} ms" if result.get('min_time') is not None else "N/A"
-            max_t = f"{result.get('max_time', 0):.2f} ms" if result.get('max_time') is not None else "N/A"
-            loss = f"{result.get('packet_loss', 0):.1f}%"
+            # Métricas (extraer valores numéricos para análisis)
+            avg_time = result.get('avg_time')
+            min_time = result.get('min_time')
+            max_time = result.get('max_time')
+            packet_loss = result.get('packet_loss', 0)
             
-            # Construir tabla de resumen
+            avg = f"{avg_time:.2f} ms" if avg_time is not None else "N/A"
+            min_t = f"{min_time:.2f} ms" if min_time is not None else "N/A"
+            max_t = f"{max_time:.2f} ms" if max_time is not None else "N/A"
+            loss = f"{packet_loss:.1f}%"
+            
+            # Construir reporte limpio y compacto (SIN stdout raw)
             md = [
-                f"### 📡 Reporte de Ping: {host}{ip_str}",
+                f"### Reporte de Ping: {host}{ip_str}",
                 "",
-                f"**Estado:** {status_icon} {status_text}",
+                f"**Estado:** {status_text} {status_icon}",
                 "",
-                "| Métrica | Valor |",
-                "| :--- | :--- |",
-                f"| **Latencia Mínima** | {min_t} |",
-                f"| **Latencia Promedio** | {avg} |",
-                f"| **Latencia Máxima** | {max_t} |",
-                f"| **Pérdida de Paquetes** | {loss} |",
+                "| Mínima | Promedio | Máxima | Pérdida |",
+                "| :---: | :---: | :---: | :---: |",
+                f"| {min_t} | **{avg}** | {max_t} | {loss} |",
                 ""
             ]
 
             # Detalles de paquetes individuales si existen
             times = result.get("times", [])
             if times:
-                md.append("**Detalle de paquetes:**")
-                pkts = ", ".join([f"`{t:.1f}ms`" for t in times])
-                md.append(f"> {pkts}")
+                md.append("**Tiempos individuales:**")
+                md.append("")
+                # Crear tabla horizontal con los tiempos
+                headers = " | ".join([f"Paquete {i+1}" for i in range(len(times))])
+                md.append(f"| {headers} |")
+                separators = " | ".join([":---:" for _ in times])
+                md.append(f"| {separators} |")
+                values = " | ".join([f"{t:.1f} ms" for t in times])
+                md.append(f"| {values} |")
                 md.append("")
                 
             # Mensaje de error si falla
             if not success:
                 error_msg = result.get("error", "No se recibieron respuestas")
                 md.append(f"**❌ Error:** {error_msg}")
-                
-            # output original crudo en bloque colapsable (opcional)
-            stdout = result.get("stdout", "").strip()
-            if stdout:
                 md.append("")
-                md.append("```text")
-                md.append(stdout)
-                md.append("```")
+            else:
+                md.append("")
+                md.append("### **Análisis y Conclusión**")
+                md.append("")
+                md.append("")
+                
+                conclusions = []
+                
+                # 1. Evaluar calidad de latencia
+                if avg_time is not None:
+                    if avg_time < 20:
+                        conclusions.append("• **Latencia excelente** (< 20ms): Ideal para aplicaciones en tiempo real, gaming y videoconferencias.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                    elif avg_time < 50:
+                        conclusions.append("• **Latencia muy buena** (20-50ms): Adecuada para la mayoría de aplicaciones web y streaming.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                    elif avg_time < 100:
+                        conclusions.append("• **Latencia aceptable** (50-100ms): Suficiente para navegación web y aplicaciones generales.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                    elif avg_time < 200:
+                        conclusions.append("• **Latencia moderada** (100-200ms): Puede afectar aplicaciones en tiempo real.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                    else:
+                        conclusions.append("• **Latencia alta** (> 200ms): Puede causar retrasos notables en aplicaciones interactivas.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                
+                # 2. Evaluar estabilidad (jitter/variabilidad)
+                if min_time is not None and max_time is not None:
+                    jitter = max_time - min_time
+                    if jitter < 5:
+                        conclusions.append(f"• **Conexión muy estable**: Variabilidad mínima de {jitter:.2f}ms entre paquetes.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                    elif jitter < 20:
+                        conclusions.append(f"• **Conexión estable**: Variabilidad moderada de {jitter:.2f}ms.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                    else:
+                        conclusions.append(f"• **Conexión variable**: Jitter de {jitter:.2f}ms puede afectar aplicaciones sensibles a latencia.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                
+                # 3. Evaluar pérdida de paquetes
+                if packet_loss == 0:
+                    conclusions.append("• **Sin pérdida de paquetes**: Conexión confiable al 100%.")
+                    conclusions.append("")  # Línea vacía para interlineado
+                elif packet_loss < 5:
+                    conclusions.append(f"• **Pérdida mínima** ({packet_loss:.1f}%): Conexión generalmente confiable.")
+                    conclusions.append("")  # Línea vacía para interlineado
+                elif packet_loss < 10:
+                    conclusions.append(f"• **Pérdida moderada** ({packet_loss:.1f}%): Puede afectar la calidad de servicio.")
+                    conclusions.append("")  # Línea vacía para interlineado
+                else:
+                    conclusions.append(f"• **Pérdida significativa** ({packet_loss:.1f}%): Problemas de conectividad detectados.")
+                    conclusions.append("")  # Línea vacía para interlineado
+                
+                # 4. Análisis de tiempos individuales (si hay datos)
+                if times and len(times) > 1:
+                    # Detectar picos anormales
+                    avg_of_times = sum(times) / len(times)
+                    outliers = [t for t in times if abs(t - avg_of_times) > (avg_of_times * 0.5)]
+                    if outliers:
+                        conclusions.append(f"• **Picos detectados**: {len(outliers)} paquete(s) con latencia anormal, posible congestión intermitente.")
+                        conclusions.append("")  # Línea vacía para interlineado
+                
+                # Agregar conclusiones al reporte
+                md.extend(conclusions)
+                md.append("")
 
             return "\n".join(md)
         

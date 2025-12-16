@@ -43,31 +43,30 @@ export function MarkdownRenderer({ content, className }) {
           if (inline) {
             return (
               <code
-                className="px-1.5 py-0.5 bg-dark-surface-secondary text-dark-accent-primary rounded text-sm font-mono border border-dark-border-primary/20 break-words"
+                className="px-1.5 py-0.5 bg-dark-surface-secondary text-dark-text-primary rounded text-sm font-mono border border-dark-border-primary/20 break-words"
                 {...props}
               />
             )
           }
           return (
             <code
-              className="block p-3 bg-dark-surface-secondary text-dark-text-primary rounded-lg text-sm font-mono overflow-x-auto mb-2 border border-dark-border-primary/20 break-words"
-              style={{ maxWidth: '100%', wordBreak: 'break-word' }}
+              className="block p-3 bg-dark-surface-secondary text-dark-text-primary rounded-lg text-sm font-mono overflow-x-auto mb-2 border border-dark-border-primary/20"
               {...props}
             />
           )
         },
         pre: ({ ...props }) => (
-          <pre className="bg-dark-surface-secondary rounded-lg p-3 overflow-x-auto mb-2 -mx-2 sm:mx-0" style={{ maxWidth: 'calc(100vw - 2rem)' }} {...props} />
+          <pre className="bg-dark-surface-secondary rounded-lg p-3 overflow-x-auto mb-2 max-w-full" {...props} />
         ),
         blockquote: ({ ...props }) => (
           <blockquote
-            className="border-l-4 border-dark-accent-primary pl-4 italic text-dark-text-secondary my-2 bg-dark-surface-secondary/30 rounded-r-lg py-2"
+            className="border-l-4 border-dark-accent-primary pl-4 italic text-dark-text-secondary my-2 bg-dark-surface-secondary/30 rounded-r-lg py-2 overflow-x-auto"
             {...props}
           />
         ),
         a: ({ ...props }) => (
           <a
-            className="text-dark-accent-primary hover:text-dark-accent-hover underline"
+            className="text-dark-accent-primary hover:text-dark-accent-hover underline break-words"
             target="_blank"
             rel="noopener noreferrer"
             {...props}
@@ -77,8 +76,8 @@ export function MarkdownRenderer({ content, className }) {
           <hr className="border-dark-border-primary my-4" {...props} />
         ),
         table: ({ ...props }) => (
-          <div className="overflow-x-auto my-3 -mx-2 sm:mx-0" style={{ maxWidth: 'calc(100vw - 2rem)' }}>
-            <table className="w-full border-collapse min-w-[400px]" {...props} />
+          <div className="overflow-x-auto my-3 w-full">
+            <table className="border-collapse w-full" {...props} />
           </div>
         ),
         thead: ({ ...props }) => (
