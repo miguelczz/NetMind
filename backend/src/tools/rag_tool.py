@@ -85,7 +85,10 @@ INSTRUCCIONES DE RESPUESTA:
 3. **FORMATO AESTÉTICO (CRÍTICO)**:
    - **Valores simples**: Usa `código en línea` (un backtick) para IPs, dominios, comandos cortos y rutas. Ej: `192.168.1.1`, `google.com`.
    - **NO USES BLOQUES DE CÓDIGO** (```) para una sola línea o un solo valor. Los bloques son solo para scripts largos o configuraciones extensas.
-   - **NO USES TABLAS** a menos que sea estrictamente necesario para comparar muchos datos. Para listas de valores, usa listas con viñetas (-).
+   - **NO USES TABLAS** a menos que sea estrictamente necesario para comparar muchos datos. Para listas de valores, usa listas con viñetas (• o -).
+   - **LISTAS CORRECTAS**: La viñeta y el texto deben estar en la MISMA LÍNEA. No pongas la viñeta sola en una línea.
+     * Bien: • **Concepto:** Definición
+     * Mal: •\n**Concepto:** Definición
    - **Evita scroll horizontal**: Mantén las líneas contenidas y usa formatos compactos.
 4. **NO INVENTAR DATOS**: Si el documento menciona 3 conceptos, explica esos 3.
 5. **MANEJO DE VACÍOS**: Si la información no está, indícalo suavemente.
@@ -96,7 +99,7 @@ CONTEXTO DE DOCUMENTOS (Información base para tu respuesta):
 
 Pregunta: {query_text}
 
-Genera una respuesta natural, útil y precisa. Recuerda: usa `código en línea` para valores técnicos, NO bloques grandes.
+Genera una respuesta natural, útil y precisa. Recuerda: usa `código en línea` para valores técnicos, NO bloques grandes, y listas bien formateadas.
 Respuesta:
 """
     

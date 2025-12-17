@@ -63,16 +63,6 @@ export function ChatContainer({ messages, isLoading }) {
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}
-          {isLoading && (
-            <div className="flex gap-3 px-4 py-3 animate-fade-in">
-              <div className="flex-shrink-0">
-                <Logo size="sm" />
-              </div>
-              <div className="bg-dark-surface-primary border border-dark-border-primary/50 rounded-2xl px-4 py-3 shadow-gemini-sm">
-                <Loading size="sm" />
-              </div>
-            </div>
-          )}
           <div ref={messagesEndRef} />
         </div>
       )}

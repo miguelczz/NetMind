@@ -4,6 +4,7 @@ import { cn } from '../../utils/cn'
 import { TOOL_NAMES } from '../../config/constants'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { Logo } from '../common/Logo'
+import { Loading } from '../ui/Loading'
 
 /**
  * Parsea y renderiza tablas en formato markdown o texto plano
@@ -186,8 +187,13 @@ export function Message({ message }) {
 
           <div className="text-[15px] leading-relaxed overflow-hidden min-w-0">
             {!isUser ? (
-              // Renderizar markdown para mensajes del agente
-              <MarkdownRenderer content={message.content} />
+              // Mostrar loader si está en streaming sin contenido
+              message.isStreaming && !message.content ? (
+                <Loading size="sm" />
+              ) : (
+                // Renderizar markdown para mensajes del agente
+                <MarkdownRenderer content={message.content} />
+              )
             ) : (
               // Texto plano para mensajes del usuario
               parsedContent.map((part, idx) => {

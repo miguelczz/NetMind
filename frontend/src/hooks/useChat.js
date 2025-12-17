@@ -102,7 +102,7 @@ export function useChat() {
   }, [sessionId, location.pathname])
 
   /**
-   * Envía un mensaje al agente
+   * Envía un mensaje al agente con streaming
    * @param {string} content - Contenido del mensaje
    */
   const sendMessage = useCallback(async (content) => {
@@ -110,7 +110,7 @@ export function useChat() {
 
     // Cancelar petición anterior si existe
     if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
+      abortControllerRef.current()
     }
 
     const userMessage = {
@@ -125,61 +125,119 @@ export function useChat() {
     setIsLoading(true)
     setError(null)
 
-    // Crear nuevo AbortController para esta petición
-    abortControllerRef.current = new AbortController()
+    // Crear mensaje del asistente vacío que se irá llenando
+    const assistantMessageId = `msg-${Date.now()}-assistant`
+    const assistantMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true, // Indicador de que está en streaming
+    }
+
+    // Agregar burbuja vacía del asistente
+    setMessages((prev) => [...prev, assistantMessage])
 
     try {
       // Enviar TODOS los mensajes de la conversación (incluyendo el nuevo) para garantizar 
-      // que el backend tenga acceso completo al contexto, similar a cómo funciona LangGraph Dev.
-      // El backend validará y evitará duplicados (líneas 93-102 de agent.py)
-      // Nota: messages es el estado antes de agregar userMessage, así que incluimos ambos
+      // que el backend tenga acceso completo al contexto
       const allMessages = [...messages, userMessage]
       const messagesForAPI = allMessages.map((msg) => ({
         role: msg.role,
         content: msg.content,
       }))
 
-      const response = await agentService.sendQuery({
-        session_id: sessionId,
-        messages: messagesForAPI,
-      })
+      // Variable para acumular el contenido
+      let accumulatedContent = ''
 
-      // Crear mensaje del asistente
-      const assistantMessage = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: response.new_messages[0]?.content || 'Sin respuesta disponible',
-        timestamp: new Date().toISOString(),
-        decision: response.decision,
-        tool: response.decision?.tool || 'none',
-      }
+      // Función para cancelar el streaming
+      const cancelStream = agentService.sendQueryStream(
+        {
+          session_id: sessionId,
+          messages: messagesForAPI,
+        },
+        // onToken: se llama por cada token recibido
+        (token) => {
+          accumulatedContent += token
+          // Actualizar el mensaje del asistente con el contenido acumulado
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: accumulatedContent }
+                : msg
+            )
+          )
+        },
+        // onComplete: se llama cuando termina el streaming
+        (finalData) => {
+          // Actualizar con la respuesta final completa y marcar como completado
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? {
+                    ...msg,
+                    content: finalData.content,
+                    isStreaming: false,
+                    executed_tools: finalData.executed_tools,
+                    executed_steps: finalData.executed_steps,
+                  }
+                : msg
+            )
+          )
+          setIsLoading(false)
+          abortControllerRef.current = null
+        },
+        // onError: se llama si hay un error
+        (err) => {
+          // No mostrar error si fue cancelado
+          if (err.name === 'AbortError' || err.message?.includes('canceled')) {
+            return
+          }
 
-      setMessages((prev) => [...prev, assistantMessage])
+          // Mensaje de error más descriptivo
+          let errorMessage = 'No se pudo procesar la solicitud'
+          if (err.message) {
+            errorMessage = err.message
+          }
+
+          // Actualizar el mensaje del asistente con el error
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? {
+                    ...msg,
+                    content: errorMessage,
+                    isStreaming: false,
+                    isError: true,
+                  }
+                : msg
+            )
+          )
+          setError(errorMessage)
+          setIsLoading(false)
+          abortControllerRef.current = null
+        }
+      )
+
+      // Guardar la función de cancelación
+      abortControllerRef.current = cancelStream
     } catch (err) {
-      // No mostrar error si fue cancelado
-      if (err.name === 'AbortError' || err.message?.includes('canceled')) {
-        return
-      }
-
-      // Mensaje de error más descriptivo
-      let errorMessage = 'No se pudo procesar la solicitud'
-      if (err.message) {
-        errorMessage = err.message
-      } else if (err.status === 0) {
-        errorMessage = 'No se pudo conectar con el servidor. Verifica que el backend esté corriendo en http://localhost:8000'
-      }
-
-      const errorMsg = {
-        id: `msg-${Date.now()}-error`,
-        role: 'assistant',
-        content: errorMessage,
-        timestamp: new Date().toISOString(),
-        isError: true,
-      }
-
-      setMessages((prev) => [...prev, errorMsg])
-      setError(errorMessage)
-    } finally {
+      // Manejo de errores síncronos (no debería ocurrir con el nuevo enfoque)
+      console.error('Error inesperado en sendMessage:', err)
+      
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessageId
+            ? {
+                ...msg,
+                content: 'Error inesperado al procesar la solicitud',
+                isStreaming: false,
+                isError: true,
+              }
+            : msg
+        )
+      )
+      setError('Error inesperado')
       setIsLoading(false)
       abortControllerRef.current = null
     }
@@ -219,7 +277,10 @@ export function useChat() {
    */
   const cancelRequest = useCallback(() => {
     if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
+      // Llamar a la función de cancelación (es una función, no un AbortController)
+      if (typeof abortControllerRef.current === 'function') {
+        abortControllerRef.current()
+      }
       setIsLoading(false)
     }
   }, [])

@@ -103,6 +103,103 @@ export const agentService = {
     })
     return response.data
   },
+
+  /**
+   * Envía una consulta al agente con streaming de respuesta
+   * @param {Object} queryData - Datos de la consulta
+   * @param {string} queryData.session_id - ID de sesión
+   * @param {string} queryData.user_id - ID de usuario (opcional)
+   * @param {Array} queryData.messages - Array de mensajes
+   * @param {Function} onToken - Callback para cada token recibido
+   * @param {Function} onComplete - Callback cuando se completa la respuesta
+   * @param {Function} onError - Callback para errores
+   * @returns {Function} - Función para cancelar el streaming
+   */
+  sendQueryStream({ session_id, user_id = null, messages }, onToken, onComplete, onError) {
+    const controller = new AbortController()
+    
+    // Usar fetch con streaming en lugar de EventSource para poder enviar POST
+    fetch(`${API_URL}${API_ENDPOINTS.AGENT_QUERY}/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        session_id,
+        user_id,
+        messages: messages.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+      }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let finalResponse = null
+
+        while (true) {
+          const { done, value } = await reader.read()
+          
+          if (done) {
+            break
+          }
+
+          // Decodificar el chunk
+          buffer += decoder.decode(value, { stream: true })
+          
+          // Procesar líneas completas
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || '' // Guardar la última línea incompleta
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6))
+                
+                if (data.type === 'token') {
+                  // Enviar token al callback
+                  onToken(data.data.content)
+                } else if (data.type === 'final_response') {
+                  // Guardar respuesta final
+                  finalResponse = data.data
+                } else if (data.type === 'error') {
+                  // Error del servidor
+                  onError(new Error(data.data.message || 'Error desconocido'))
+                  return
+                } else if (data.type === 'done') {
+                  // Streaming completado
+                  if (finalResponse) {
+                    onComplete(finalResponse)
+                  } else {
+                    onError(new Error('No se recibió respuesta final'))
+                  }
+                  return
+                }
+              } catch (e) {
+                console.error('Error al parsear chunk SSE:', e, line)
+              }
+            }
+          }
+        }
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') {
+          console.log('Streaming cancelado')
+        } else {
+          onError(error)
+        }
+      })
+
+    // Retornar función para cancelar
+    return () => controller.abort()
+  },
 }
 
 /**

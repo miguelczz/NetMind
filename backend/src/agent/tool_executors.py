@@ -586,10 +586,18 @@ Responde SOLO con una palabra: "seguimiento" o "nueva".
                 @cache_result("conversation_context", ttl=1800)
                 def generate_from_context(context: str, user_prompt: str) -> str:
                     followup_prompt = f"""
-Basándote en la siguiente conversación previa, responde la pregunta del usuario de forma DIRECTA, COMPACTA y enfocada en lo que realmente le interesa.
+Basándote en la siguiente conversación previa, responde la pregunta del usuario de forma DIRECTA, PRECISA y COMPACTA.
 
-IMPORTANTE:
+REGLAS CRÍTICAS PARA DATOS NUMÉRICOS:
+- Si la pregunta es sobre DATOS NUMÉRICOS (latencia, tiempo, porcentaje, pérdida de paquetes, etc.), extrae los valores EXACTOS del contexto
+- NO inventes, NO aproximes, NO redondees números - usa SOLO los valores EXACTOS que aparecen en el contexto
+- Si hay múltiples valores, usa el más reciente o el más relevante según la pregunta
+- Copia los números EXACTAMENTE como aparecen (con decimales si los tienen)
+- Si el contexto dice "77.29 ms", NO digas "77 ms" ni "30 ms" - di "77.29 ms"
+
+REGLAS GENERALES:
 - Sé CONCISO: ve directo al punto, sin rodeos ni explicaciones innecesarias
+- FORMATO DE LISTAS: Si usas listas, la viñeta debe estar en la MISMA LÍNEA que el texto (Ej: • **Concepto:** ...)
 - Responde SOLO lo que el usuario pregunta, sin información adicional no solicitada
 - Si la pregunta es sobre algo mencionado anteriormente, elabora SOLO sobre eso específicamente
 - Evita repeticiones y redundancias
@@ -600,7 +608,7 @@ Conversación previa:
 
 Pregunta del usuario: {user_prompt}
 
-Respuesta (directa y compacta):
+Respuesta (directa, precisa, con valores EXACTOS del contexto):
 """
                     return llm.generate(followup_prompt).strip()
                 

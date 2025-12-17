@@ -23,7 +23,7 @@ async def stream_graph_execution(
 ) -> AsyncIterator[str]:
     """
     Ejecuta el grafo y stream los resultados usando SSE.
-    OPTIMIZACIÓN: Usa astream_events para capturar tokens del LLM en tiempo real.
+    CORREGIDO: Simula streaming dividiendo la respuesta final en chunks.
     
     Args:
         initial_state: Estado inicial del grafo
@@ -33,74 +33,72 @@ async def stream_graph_execution(
         Chunks de datos en formato SSE
     """
     try:
+        import asyncio
+        
         final_state = None
-        last_node = None
         
-        # OPTIMIZACIÓN: Usar astream_events para capturar eventos en tiempo real
-        # Esto permite capturar tokens del LLM mientras se generan
-        async for event in graph.astream_events(initial_state, version="v2"):
-            event_type = event.get("event")
-            event_name = event.get("name", "")
+        # Ejecutar el grafo UNA SOLA VEZ
+        async for chunk in graph.astream(initial_state, stream_mode="updates"):
+            # chunk es un diccionario con las actualizaciones de cada nodo
+            # Formato: {node_name: {state_updates}}
             
-            # Capturar actualizaciones de nodos
-            if event_type == "on_chain_start" or event_type == "on_chain_end":
-                node_name = event_name.split(".")[-1] if "." in event_name else event_name
-                if node_name != last_node:
-                    last_node = node_name
-                    chunk_data = {
-                        "type": "node_update",
-                        "data": {
-                            "node": node_name,
-                            "status": "started" if event_type == "on_chain_start" else "completed"
-                        }
+            for node_name, state_updates in chunk.items():
+                # Enviar actualización de nodo
+                node_data = {
+                    "type": "node_update",
+                    "data": {
+                        "node": node_name,
+                        "status": "completed"
                     }
-                    yield f"data: {json.dumps(chunk_data)}\n\n"
-            
-            # Capturar tokens del LLM en tiempo real (OPTIMIZACIÓN CRÍTICA)
-            if event_type == "on_chat_model_stream":
-                chunk = event.get("data", {}).get("chunk")
-                if chunk and hasattr(chunk, "content") and chunk.content:
-                    token_data = {
-                        "type": "token",
-                        "data": {
-                            "content": chunk.content
-                        }
-                    }
-                    yield f"data: {json.dumps(token_data)}\n\n"
-            
-            # Capturar actualizaciones de estado
-            if event_type == "on_chain_end" and "data" in event:
-                state_updates = event.get("data", {}).get("output", {})
+                }
+                yield f"data: {json.dumps(node_data)}\n\n"
+                
+                # Capturar el estado final cuando llegue
                 if state_updates:
-                    chunk_data = {
-                        "type": "state_update",
-                        "data": {
-                            "plan_steps": state_updates.get("plan_steps", []),
-                            "executed_tools": state_updates.get("executed_tools", []),
-                            "executed_steps": state_updates.get("executed_steps", []),
-                        }
+                    final_state = state_updates
+        
+        # Obtener respuesta final completa
+        if final_state:
+            supervised_output = final_state.get('supervised_output')
+            final_output = final_state.get('final_output')
+            assistant_response = supervised_output or final_output or "No se pudo generar una respuesta."
+            
+            # PSEUDO-STREAMING: Dividir la respuesta en chunks pequeños
+            # Esto simula el efecto visual de streaming sin modificar todo el código
+            chunk_size = 5  # Caracteres por chunk (más pequeño = más fluido)
+            for i in range(0, len(assistant_response), chunk_size):
+                chunk_text = assistant_response[i:i + chunk_size]
+                token_data = {
+                    "type": "token",
+                    "data": {
+                        "content": chunk_text
                     }
-                    yield f"data: {json.dumps(chunk_data)}\n\n"
-        
-        # Obtener estado final después del streaming
-        final_state = await graph.ainvoke(initial_state)
-        
-        # Enviar respuesta final completa (por si acaso no se capturaron todos los tokens)
-        supervised_output = final_state.get('supervised_output')
-        final_output = final_state.get('final_output')
-        assistant_response = supervised_output or final_output or "No se pudo generar una respuesta."
-        
-        # Solo enviar respuesta final si no se envió completamente por streaming
-        response_data = {
-            "type": "final_response",
-            "data": {
-                "content": assistant_response,
-                "executed_tools": final_state.get('executed_tools', []),
-                "executed_steps": final_state.get('executed_steps', []),
-                "thought_chain": final_state.get('thought_chain', []) if settings.show_thought_chain else None,
+                }
+                yield f"data: {json.dumps(token_data)}\n\n"
+                # Delay para simular streaming (50ms = velocidad visible pero no molesta)
+                await asyncio.sleep(0.05)  # 50ms entre chunks
+            
+            # Enviar respuesta final completa con metadatos
+            response_data = {
+                "type": "final_response",
+                "data": {
+                    "content": assistant_response,
+                    "executed_tools": final_state.get('executed_tools', []),
+                    "executed_steps": final_state.get('executed_steps', []),
+                    "thought_chain": final_state.get('thought_chain', []) if settings.show_thought_chain else None,
+                }
             }
-        }
-        yield f"data: {json.dumps(response_data)}\n\n"
+            yield f"data: {json.dumps(response_data)}\n\n"
+        else:
+            # Si no hay estado final, enviar error
+            error_data = {
+                "type": "error",
+                "data": {
+                    "message": "No se pudo generar una respuesta",
+                    "type": "NoStateError",
+                }
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
         
         # Señal de finalización
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -130,6 +128,7 @@ async def agent_query_stream(
     Endpoint para consultas con streaming de respuestas usando Server-Sent Events.
     
     La respuesta se envía en tiempo real a medida que el agente procesa la consulta.
+    CORREGIDO: Guarda el contexto de ventana después del streaming.
     """
     try:
         # Validación: verificar que haya mensajes
@@ -178,9 +177,35 @@ async def agent_query_stream(
             messages=graph_messages
         )
 
+        # Wrapper para capturar la respuesta final y guardarla en el contexto
+        async def stream_with_context_save():
+            """Wrapper que captura la respuesta final y la guarda en el contexto"""
+            assistant_response = None
+            
+            async for chunk in stream_graph_execution(initial_state, query.session_id):
+                # Capturar la respuesta final del streaming
+                if '"type": "final_response"' in chunk:
+                    try:
+                        # Extraer el contenido de la respuesta final
+                        import json
+                        data_str = chunk.replace("data: ", "").strip()
+                        data = json.loads(data_str)
+                        if data.get("type") == "final_response":
+                            assistant_response = data.get("data", {}).get("content")
+                    except:
+                        pass
+                
+                # Enviar el chunk al cliente
+                yield chunk
+            
+            # Guardar la respuesta del asistente en el contexto de ventana
+            if assistant_response:
+                session_state.add_message("assistant", assistant_response)
+                logger.info(f"[Streaming] Respuesta guardada en contexto de ventana para sesión {query.session_id}")
+
         # Crear respuesta de streaming
         return StreamingResponse(
-            stream_graph_execution(initial_state, query.session_id),
+            stream_with_context_save(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -197,4 +222,5 @@ async def agent_query_stream(
             status_code=500,
             detail=f"Error interno del servidor: {str(e)}"
         )
+
 

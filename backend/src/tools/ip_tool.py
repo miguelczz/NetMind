@@ -555,17 +555,26 @@ class IPTool:
                 
                 # Determinar el mejor host considerando latencia y estabilidad
                 if difference < 5 and abs(var1 - var2) < 5:
-                    comparison_parts.append(f"**• Ambos hosts ofrecen rendimiento prácticamente idéntico. Puedes usar cualquiera.")
+                    comparison_parts.append(f"• Ambos hosts ofrecen rendimiento prácticamente idéntico. Puedes usar cualquiera.")
                 elif faster_avg < 50 and var1 < var2 and faster_host == ip1:
-                    comparison_parts.append(f"**• {faster_host}**: Mejor latencia ({faster_avg:.2f}ms) y más estable (jitter: {var1:.2f}ms).")
+                    comparison_parts.append(f"• **{faster_host}**: Mejor latencia ({faster_avg:.2f}ms) y más estable (jitter: {var1:.2f}ms).")
                 elif faster_avg < 50 and var2 < var1 and faster_host == ip2:
-                    comparison_parts.append(f"**• {faster_host}**: Mejor latencia ({faster_avg:.2f}ms) y más estable (jitter: {var2:.2f}ms).")
-                elif var1 < var2 and abs(difference) < 20:
-                    comparison_parts.append(f"**• {ip1}**: Aunque {faster_host} es más rápido, {ip1} es más estable (jitter: {var1:.2f}ms vs {var2:.2f}ms).")
-                elif var2 < var1 and abs(difference) < 20:
-                    comparison_parts.append(f"**• {ip2}**: Aunque {faster_host} es más rápido, {ip2} es más estable (jitter: {var2:.2f}ms vs {var2:.2f}ms).")
+                    comparison_parts.append(f"• **{faster_host}**: Mejor latencia ({faster_avg:.2f}ms) y más estable (jitter: {var2:.2f}ms).")
+                elif faster_avg < 50:
+                    comparison_parts.append(f"• **{faster_host}**: Ligeramente más rápido ({faster_avg:.2f}ms vs {slower_avg:.2f}ms), aunque ambos son buenos.")
                 else:
-                    comparison_parts.append(f"**• {faster_host}**: Ofrece mejor latencia ({faster_avg:.2f}ms vs {slower_avg:.2f}ms).")
+                    comparison_parts.append(f"• **{faster_host}**: Significativamente mejor ({faster_avg:.2f}ms vs {slower_avg:.2f}ms).")
+                
+                # Análisis de pérdida de paquetes
+                if loss1 > 0 or loss2 > 0:
+                    if loss1 == loss2:
+                        comparison_parts.append(f"• ⚠️ Ambos presentan la misma pérdida de paquetes ({loss1}%).")
+                    elif loss1 < loss2:
+                        comparison_parts.append(f"• **{ip1}**: Más confiable ({loss1}% pérdida vs {loss2}% de {ip2}).")
+                    else:
+                        comparison_parts.append(f"• **{ip2}**: Más confiable ({loss2}% pérdida vs {loss1}% de {ip1}).")
+                else:
+                    comparison_parts.append("• Ambos tienen 0% de pérdida de paquetes (conexión confiable).")
             
             comparison_parts.append("")
             
