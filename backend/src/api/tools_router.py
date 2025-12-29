@@ -4,6 +4,7 @@ import ipaddress
 import requests
 import socket
 from typing import List, Optional, Dict, Any
+import ipaddress
 
 router = APIRouter(prefix="/tools", tags=["Quick Tools"])
 
@@ -42,20 +43,40 @@ async def get_dashboard_status():
     import subprocess
     import re
     
-    # Simple ping helper (non-blocking ideally, but blocking for MVP)
+    # Simple ping helper with TCP fallback for Heroku/Cloud
     def simple_ping(host):
+        # 1. Try system ping first (works in local)
+        import time
         param = '-n' if platform.system().lower()=='windows' else '-c'
-        # Timeout 1s (1000ms)
         command = ['ping', param, '1', host]
         try:
-            # Short timeout to avoid blocking main thread too long
+            start_time = time.time()
             output = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
             if output.returncode == 0:
-                # Extract time
                 match = re.search(r"time[=<](\d+)", output.stdout)
                 if match:
                     return float(match.group(1))
-                return 1.0 # <1ms
+                return 1.0
+        except:
+            pass
+            
+        # 2. Fallback: TCP Head/Connect (Works on Heroku)
+        # We try to connect to port 80/443 to measure "app targets" or 8.8.8.8:53
+        port = 80
+        if "google" in host or "8.8.8.8" in host: port = 53 # DNS port is often open
+        if host == "localhost": port = 8000 # Typical dev port
+        
+        try:
+            start = time.time()
+            # Try to resolve and connect
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1.5)
+            result = sock.connect_ex((host, port))
+            end = time.time()
+            sock.close()
+            
+            if result == 0 or result == 111: # 0=success, 111=Connection refused (but host is alive)
+                return max(1.0, round((end - start) * 1000, 2))
             return None
         except:
             return None
@@ -111,29 +132,41 @@ async def geo_trace(host: str = Query(..., description="Host to trace")):
     
     hops_ips = []
     
-    # Simplified traceroute for demo (captures IPs)
-    # Using 'tracert -d' on windows to avoid DNS lookup delay, 'traceroute -n' on linux
-    cmd = ['tracert', '-d', '-h', '15', host] if platform.system().lower() == 'windows' else ['traceroute', '-n', '-m', '15', host]
+    def is_public_ip(ip: str) -> bool:
+        try:
+            ip_obj = ipaddress.ip_address(ip)
+            return not (ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast)
+        except:
+            return False
+
+    # 0. Get Source IP (Server/Local)
+    try:
+        source_ip = requests.get("https://api.ipify.org", timeout=5).text
+        if is_public_ip(source_ip):
+            hops_ips.append(source_ip)
+    except:
+        pass
+
+    # 1. Run Traceroute (Optimized)
+    # Windows: -d (no DNS), -h 20 (max hops), -w 200 (wait 200ms)
+    # Linux: -n (no DNS), -m 20 (max hops), -q 1 (1 query), -w 1 (wait 1s)
+    cmd = ['tracert', '-d', '-h', '20', '-w', '200', host] if platform.system().lower() == 'windows' else ['traceroute', '-n', '-m', '20', '-q', '1', '-w', '1', host]
     
     try:
-        # Run traceroute (this can take time, in prod use async task/process)
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        # We handle output line by line or wait
-        out, err = proc.communicate(timeout=30) 
+        out, err = proc.communicate(timeout=45) 
         
-        # Parse IPs from output
         lines = out.split('\n')
         for line in lines:
             ip_match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', line)
             if ip_match:
                 ip = ip_match.group(1)
-                if ip not in hops_ips:
+                if ip not in hops_ips and is_public_ip(ip):
                     hops_ips.append(ip)
                 
     except Exception:
-        # If local traceroute fails (common on Heroku/Cloud), use external trace API
+        # Fallback to External MTR API if local fails
         try:
-            # HackerTarget provides a free MTR/Traceroute API (limited requests)
             external_resp = requests.get(f"https://api.hackertarget.com/mtr/?q={host}", timeout=15)
             if external_resp.status_code == 200:
                 lines = external_resp.text.split('\n')
@@ -141,21 +174,25 @@ async def geo_trace(host: str = Query(..., description="Host to trace")):
                     ip_match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', line)
                     if ip_match:
                         ip = ip_match.group(1)
-                        if ip not in hops_ips:
+                        if ip not in hops_ips and is_public_ip(ip):
                             hops_ips.append(ip)
-        except Exception:
+        except:
             pass
         
-    if not hops_ips:
-        # Final fallback: Server source to Host destination
-        try:
-            # 1. Get server IP (self)
-            server_ip = requests.get("https://api.ipify.org", timeout=5).text
-            # 2. Get destination IP
-            target_ip = socket.gethostbyname(host)
-            hops_ips = [server_ip, target_ip]
-        except Exception:
-             raise HTTPException(status_code=400, detail="Could not trace host or find destination")
+    # Ensure target IP is at the end if we resolved it
+    try:
+        target_ip = socket.gethostbyname(host)
+        if target_ip not in hops_ips and is_public_ip(target_ip):
+            hops_ips.append(target_ip)
+        elif target_ip in hops_ips:
+            # Move target to the end
+            hops_ips.remove(target_ip)
+            hops_ips.append(target_ip)
+    except:
+        pass
+
+    if len(hops_ips) < 2:
+         raise HTTPException(status_code=400, detail="Could not trace host or find public nodes")
 
     # 2. Geolocation (Batch query to ip-api.com)
     # Max 100 IPs per batch. We have max 15 hops.
