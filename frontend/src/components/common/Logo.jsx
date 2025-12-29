@@ -26,8 +26,8 @@ export function Logo({ size = 'md' }) {
       {!imageError ? (
         <img 
           src="https://img.icons8.com/ios/100/ffffff/network-cable.png" 
-          alt="Network Cable Logo" 
-          className={`${iconSizes[size]} object-contain filter brightness-0 invert opacity-90`}
+          alt="NetMind Logo" 
+          className={`${iconSizes[size]} object-contain opacity-90`}
           onError={() => setImageError(true)}
         />
       ) : (

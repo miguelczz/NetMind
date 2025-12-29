@@ -16,9 +16,8 @@ export function Layout({ children }) {
 
   const navItems = [
     { path: '/', label: 'Chat', icon: MessageSquare },
-    { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/dashboard', label: 'Monitoreo', icon: LayoutDashboard },
     { path: '/geotrace', label: 'Geo-Trace', icon: Globe },
-    { path: '/tools', label: 'Herramientas', icon: PenTool },
     { path: '/files', label: 'Archivos', icon: FileText },
   ]
 

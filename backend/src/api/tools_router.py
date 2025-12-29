@@ -7,112 +7,8 @@ from typing import List, Optional, Dict, Any
 
 router = APIRouter(prefix="/tools", tags=["Quick Tools"])
 
-class SubnetResult(BaseModel):
-    cidr: str
-    network_address: str
-    broadcast_address: str
-    netmask: str
-    hostmask: str
-    total_hosts: int
-    usable_hosts: int
-    first_host: str
-    last_host: str
-    ip_class: str
-    is_private: bool
-
-class DNSRecord(BaseModel):
-    type: str
-    value: str
-    ttl: Optional[int] = None
-
-class DNSResult(BaseModel):
-    domain: str
-    records: List[DNSRecord]
-
-@router.get("/subnet-calc", response_model=SubnetResult)
-async def subnet_calculator(cidr: str = Query(..., description="CIDR block or IP/Mask (e.g., 192.168.1.0/24)")):
-    try:
-        network = ipaddress.ip_network(cidr, strict=False)
-        
-        # Determine IP Class (Rough approximation for IPv4)
-        first_octet = int(str(network.network_address).split('.')[0])
-        ip_class = "Unknown"
-        if 1 <= first_octet <= 126: ip_class = "A"
-        elif 128 <= first_octet <= 191: ip_class = "B"
-        elif 192 <= first_octet <= 223: ip_class = "C"
-        elif 224 <= first_octet <= 239: ip_class = "D (Multicast)"
-        elif 240 <= first_octet <= 255: ip_class = "E (Experimental)"
-
-        return SubnetResult(
-            cidr=str(network),
-            network_address=str(network.network_address),
-            broadcast_address=str(network.broadcast_address),
-            netmask=str(network.netmask),
-            hostmask=str(network.hostmask),
-            total_hosts=network.num_addresses,
-            usable_hosts=max(0, network.num_addresses - 2) if network.prefixlen < 31 else max(0, network.num_addresses),
-            first_host=str(network[1]) if network.num_addresses > 2 else str(network[0]),
-            last_host=str(network[-2]) if network.num_addresses > 2 else str(network[-1]),
-            ip_class=ip_class,
-            is_private=network.is_private
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@router.get("/dns-lookup", response_model=DNSResult)
-async def dns_lookup(domain: str = Query(..., description="Domain name")):
-    try:
-        import dns.resolver
-        
-        records = []
-        record_types = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME']
-        
-        for r_type in record_types:
-            try:
-                answers = dns.resolver.resolve(domain, r_type)
-                for rdata in answers:
-                    records.append(DNSRecord(
-                        type=r_type,
-                        value=rdata.to_text(),
-                        ttl=answers.ttl
-                    ))
-            except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.NoNameservers):
-                continue
-            except Exception:
-                continue
-                
-        if not records:
-             # Fallback to basic socket lookup if DNS resolver fails completely or returns nothing specific
-             try:
-                 ip = socket.gethostbyname(domain)
-                 records.append(DNSRecord(type='A', value=ip))
-             except:
-                 pass
-
-        return DNSResult(domain=domain, records=records)
-    except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/mac-lookup")
-async def mac_lookup(mac: str = Query(..., description="MAC Address")):
-    try:
-        # Using macvendors.co free API (No key required, rate limited but sufficient for basic tool)
-        clean_mac = mac.replace(":", "").replace("-", "").replace(".", "")
-        if len(clean_mac) < 6:
-             raise ValueError("Invalid MAC Address")
-             
-        # Use simple requests with timeout
-        response = requests.get(f"https://macvendors.co/api/{clean_mac}", timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            # The API returns structured data under 'result', or sometimes directly
-            return data.get("result", {"company": "Unknown", "address": "Unknown"})
-        else:
-            return {"company": "Not Found", "error": "API Error"}
-            
-    except Exception as e:
-        # Don't fail hard on external API issues, just return not found
-        return {"company": "Lookup Failed", "error": str(e)}
+# --- Quick Tools Endpoints Removed by User Request ---
+# (Subnet, DNS, MAC Lookup deleted)
 
 # --- Dashboard Endpoints ---
 
@@ -167,21 +63,25 @@ async def get_dashboard_status():
     for t in targets:
         latency = simple_ping(t["host"])
         status = "down"
+        
+        # Si hay latencia real, usarla. Si no (timeout), usar penalización de 999ms
+        # para que impacte el gráfico y el promedio visualmente.
+        metric_value = latency if latency is not None else 999.0
+        
         if latency is not None:
             status = "operational" if latency < 100 else "degraded"
-            total_latency += latency
-            count_up += 1
-        else:
-            latency = 999.0
+        
+        total_latency += metric_value
+        count_up += 1 # Contamos todos los objetivos para el promedio, incluso los caídos
             
         services.append(ServiceStatus(
             name=t["name"],
             status=status,
-            latency_ms=latency,
+            latency_ms=metric_value,
             uptime_percentage=99.9 if status != "down" else 0.0
         ))
         
-    avg = total_latency / count_up if count_up > 0 else 0
+    avg = total_latency / len(targets) if targets else 0
     
     return DashboardStats(
         active_incidents=len(targets) - count_up,

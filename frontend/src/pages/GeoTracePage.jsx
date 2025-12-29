@@ -6,63 +6,66 @@ import axios from 'axios';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import iconMarkerStart from 'leaflet/dist/images/marker-icon.png';
+import iconMarkerShadow from 'leaflet/dist/images/marker-shadow.png';
+import { useNetworkContext } from '../contexts/NetworkContext';
+import api from '../api/config';
 
-// Fix para iconos de Leaflet en React (problema común de webpack/vite)
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-
-let DefaultIcon = L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41]
+// Fix Leaflet icons
+const DefaultIcon = L.icon({
+  iconUrl: iconMarkerStart,
+  shadowUrl: iconMarkerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41]
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-});
-
 // Componente para re-centrar el mapa
 function ChangeView({ center }) {
-    const map = useMap();
-    map.setView(center, map.getZoom());
-    return null;
+  const map = useMap();
+  map.setView(center, map.getZoom());
+  return null;
 }
 
 export default function GeoTracePage() {
-    const [host, setHost] = useState('');
-    const [points, setPoints] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [center, setCenter] = useState([20, 0]); // Centro inicial global
+  const { 
+    geoHost: host, 
+    setGeoHost: setHost, 
+    geoResults: traceData, 
+    setGeoResults: setTraceData,
+    isTracing: loading,
+    setIsTracing: setLoading
+  } = useNetworkContext();
+  
+  const [error, setError] = useState('');
+  const [center, setCenter] = useState([20, 0]);
 
-    const handleTrace = async () => {
-        if(!host) return;
-        setLoading(true);
-        setError('');
-        setPoints([]);
-        
-        try {
+  const handleTrace = async () => {
+    if (!host) return;
+    
+    setLoading(true);
+    setTraceData(null);
+    setError('');
+    
+    try {
             const res = await api.get(`/tools/geo-trace?host=${encodeURIComponent(host)}`);
             const data = res.data;
             
             if (data.length === 0) {
                 setError('No se encontraron datos geográficos para esta ruta (¿IPs privadas?)');
             } else {
-                setPoints(data);
-                // Centrar en el primer punto (origen aproximado) o destino
-                if (data.length > 0) {
-                    setCenter([data[0].lat, data[0].lon]);
-                }
+                setTraceData(data);
+                // Centrar en el primer punto si es necesario (opcional)
             }
         } catch (err) {
+            console.error(err);
             setError(err.response?.data?.detail || 'Error al ejecutar trazado');
         } finally {
             setLoading(false);
         }
     };
 
+    const points = traceData || [];
     const polylinePositions = points.map(p => [p.lat, p.lon]);
 
     return (
@@ -97,11 +100,12 @@ export default function GeoTracePage() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0 pb-8">
                 {/* Mapa */}
-                <div className="lg:col-span-2 bg-dark-bg-secondary rounded-xl overflow-hidden border border-dark-border-primary relative z-0">
-                    <MapContainer center={[20, 0]} zoom={2} style={{ height: '100%', width: '100%' }}>
-                         {points.length > 0 && <ChangeView center={center} />}
+                <div className="lg:col-span-2 bg-dark-bg-secondary rounded-xl overflow-hidden border border-dark-border-primary relative z-0 min-h-[400px] lg:h-auto flex flex-col">
+                    <div className="flex-1 h-full min-h-[400px]">
+                        <MapContainer center={[20, 0]} zoom={2} style={{ height: '100%', width: '100%', minHeight: '400px' }}>
+                            {points.length > 0 && <ChangeView center={center} />}
                         <TileLayer
                             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -122,6 +126,7 @@ export default function GeoTracePage() {
                             </Marker>
                         ))}
                     </MapContainer>
+                    </div>
                 </div>
 
                 {/* Lista de Saltos */}
