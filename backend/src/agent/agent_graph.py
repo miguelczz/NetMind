@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, START, END, add_messages
 from langchain_core.messages import AnyMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.channels import LastValue
 from ..models.schemas import AgentState, Message
 from ..core.graph_state import GraphState
@@ -362,7 +363,7 @@ def orchestrator_node(state: GraphState) -> Dict[str, Any]:
     }
 
 
-def ejecutor_agent_node(state: GraphState) -> Dict[str, Any]:
+def ejecutor_agent_node(state: GraphState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     Agente Ejecutor: Ejecuta las herramientas (RAG e IP) según el plan.
     Combina la selección de herramienta y su ejecución en un solo nodo.
@@ -379,22 +380,32 @@ def ejecutor_agent_node(state: GraphState) -> Dict[str, Any]:
     Retorna un diccionario parcial con solo los campos modificados para que
     LangGraph propague correctamente los valores con LastValue.
     """
-    plan_steps = state.plan_steps or []
     thought_chain = state.thought_chain or []
 
-    # Si ya no quedan pasos, no modificar nada
-    if not plan_steps:
-        return {}
-
-    # Extraer el siguiente paso del plan
-    plan_steps_copy = list(plan_steps)
+    # Obtener callback de streaming si existe
+    stream_callback = None
+    if config and "configurable" in config:
+        stream_callback = config["configurable"].get("stream_callback")
+    
+    # Extraer el paso actual del plan
+    plan_steps_copy = list(state.plan_steps or [])
+    if not plan_steps_copy:
+        thought_chain = add_thought(
+            thought_chain,
+            "Agente_Ejecutor",
+            "No hay pasos para ejecutar",
+            "El plan está vacío",
+            "error"
+        )
+        return {"thought_chain": thought_chain}
+    
     current_step = plan_steps_copy.pop(0)
-
-    # Obtener el prompt original del usuario para contexto
+    
+    # Obtener el prompt del usuario para contexto
     user_prompt = get_user_prompt_from_messages(state.messages)
     
-    # Limitar longitud del prompt
-    MAX_PROMPT_LENGTH = 6000
+    # Limitar tamaño del prompt para evitar problemas de memoria
+    MAX_PROMPT_LENGTH = 2000
     if len(user_prompt) > MAX_PROMPT_LENGTH:
         user_prompt = user_prompt[:MAX_PROMPT_LENGTH] + "..."
     
@@ -405,11 +416,11 @@ def ejecutor_agent_node(state: GraphState) -> Dict[str, Any]:
     # Ejecutar la herramienta correspondiente
     try:
         if tool_name == "ip":
-            result = execute_ip_tool(current_step, user_prompt, state.messages)
+            result = execute_ip_tool(current_step, user_prompt, state.messages, stream_callback=stream_callback)
         elif tool_name == "rag":
-            result = execute_rag_tool(current_step, user_prompt, state.messages)
+            result = execute_rag_tool(current_step, user_prompt, state.messages, stream_callback=stream_callback)
         elif tool_name == "dns":
-            result = execute_dns_tool(current_step, user_prompt, state.messages)
+            result = execute_dns_tool(current_step, user_prompt, state.messages, stream_callback=stream_callback)
         else:
             result = {"error": "tool_not_found"}
     except Exception as e:
@@ -460,7 +471,7 @@ def ejecutor_agent_node(state: GraphState) -> Dict[str, Any]:
     }
 
 
-def supervisor_node(state: GraphState) -> Dict[str, Any]:
+async def supervisor_node(state: GraphState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     Supervisor: Valida la calidad de la respuesta final y corrige errores si es necesario.
     Asegura que la respuesta cumple con estándares de calidad antes de enviarla al usuario.
@@ -544,7 +555,7 @@ def supervisor_node(state: GraphState) -> Dict[str, Any]:
                     contexts=contexts if contexts else [],
                     metadata={
                         "tool_used": "rag",  # Se puede mejorar detectando qué herramienta se usó
-                        "quality_score": state.quality_score
+                        "quality_score": state.quality_score if hasattr(state, 'quality_score') else 0.0
                     }
                 )
                 
@@ -604,69 +615,8 @@ def supervisor_node(state: GraphState) -> Dict[str, Any]:
             "thought_chain": thought_chain
         }
     
-    # DETECTAR si la respuesta indica que está fuera de tema usando LLM
-    # Si es así, NO intentar mejorarla, simplemente pasarla tal cual
-    # Incluir contexto de conversación para preguntas de seguimiento
-    context_text = ""
-    if state.messages and len(state.messages) > 1:
-        # Obtener últimos mensajes para contexto
-        recent_messages = state.messages[-5:]  # Últimos 5 mensajes
-        context_parts = []
-        for msg in recent_messages:
-            role = getattr(msg, "role", None) or getattr(msg, "type", "user")
-            content = getattr(msg, "content", str(msg))
-            if role in ["user", "human"]:
-                context_parts.append(f"Usuario: {content[:200]}")
-            elif role in ["assistant", "agent"]:
-                context_parts.append(f"Asistente: {content[:200]}")
-        if context_parts:
-            context_text = "\n\nContexto de conversación reciente:\n" + "\n".join(context_parts)
-    
-    out_of_topic_check_prompt = f"""
-Analiza la siguiente respuesta y determina si indica que la pregunta del usuario está fuera del tema de redes y telecomunicaciones.
-
-Pregunta del usuario: "{user_prompt}"
-{context_text}
-
-Respuesta generada:
-{final_output}
-
-IMPORTANTE: Si la pregunta del usuario hace referencia a resultados previos de ping, DNS, traceroute, o análisis de red mencionados en el contexto, la pregunta está DENTRO del tema aunque no mencione explícitamente redes.
-
-Determina si la respuesta:
-1. Indica claramente que no puede responder porque la pregunta está fuera del tema de redes/telecomunicaciones
-2. O es una respuesta normal sobre redes/telecomunicaciones (incluyendo preguntas sobre resultados previos de análisis de red)
-
-Responde SOLO con una palabra: "fuera_tema" o "dentro_tema".
-"""
-    
-    try:
-        out_of_topic_response = llm.generate(out_of_topic_check_prompt)
-        is_out_of_topic = "fuera_tema" in out_of_topic_response.strip().lower()
-    except Exception as e:
-        logger.warning(f"[Supervisor] Error al verificar si está fuera de tema: {e}. Continuando con validación normal.")
-        is_out_of_topic = False
-    
-    if is_out_of_topic:
-        # Si la respuesta indica que está fuera de tema, NO intentar mejorarla
-        # El Sintetizador ya manejó correctamente la situación
-        logger.info("[Supervisor] Respuesta detectada como fuera de tema por LLM - pasando sin modificar")
-        thought_chain = add_thought(
-            thought_chain,
-            "Supervisor",
-            "Validación: fuera de tema",
-            "LLM detectó que la respuesta indica que está fuera de tema, pasando sin modificar",
-            "info"
-        )
-        # OPTIMIZACIÓN: Limpiar estado para evitar acumulación de memoria
-        if state.messages and len(state.messages) > 30:
-            state.cleanup_old_messages(max_messages=30)
-        
-        return {
-            "supervised_output": final_output,
-            "quality_score": 0.8,  # Buena calidad porque manejó correctamente el caso fuera de tema
-            "thought_chain": thought_chain
-        }
+    # Validar calidad de la respuesta usando LLM
+    # OPTIMIZACIÓN: Se eliminó la verificación de "fuera de tema" redundante (ya la hace el Planner)
     
     # ---------------------------------------------------------
     # FALLBACK: INFORMACIÓN NO ENCONTRADA EN DOCUMENTOS
@@ -712,7 +662,8 @@ INSTRUCCIONES CRÍTICAS:
 Genera la respuesta con el disclaimer y la información técnica completa:
 """
         try:
-            fallback_output = llm.generate(fallback_prompt)
+            # ASYNC CHANGE
+            fallback_output = await llm.agenerate(fallback_prompt)
             thought_chain = add_thought(
                 thought_chain,
                 "Supervisor",
@@ -729,6 +680,11 @@ Genera la respuesta con el disclaimer y la información técnica completa:
             logger.error(f"[Supervisor] Error en fallback de conocimiento general: {e}")
             # Si falla, continuar con flujo normal (probablemente mejorará la respuesta "no se" original)
     
+    # Obtener callback de streaming si existe (para mejoras)
+    stream_callback = None
+    if config and "configurable" in config:
+        stream_callback = config["configurable"].get("stream_callback")
+
     # Validar calidad de la respuesta usando LLM
     quality_prompt = f"""
 Evalúa la siguiente respuesta generada para el usuario y determina:
@@ -736,18 +692,25 @@ Evalúa la siguiente respuesta generada para el usuario y determina:
 2. Si es clara y concisa
 3. Si contiene información relevante
 4. Si hay errores obvios o información incorrecta
+5. Si la respuesta indica que la pregunta está FUERA DEL TEMA de redes/telecomunicaciones (ej: "No puedo responder preguntas sobre cocina", etc).
 
 Pregunta del usuario: "{user_prompt}"
 
 Respuesta generada:
 {final_output}
 
+INSTRUCCIONES DE PUNTUACIÓN:
+- Si la respuesta indica CORRECTAMENTE que la pregunta está fuera de tema, asigna un puntaje de 10 (Excelente manejo de límites).
+- Si la respuesta es técnica y correcta, asigna puntaje alto.
+- Si la respuesta es vaga, incorrecta o no responde, asigna puntaje bajo.
+
 Responde SOLO con un número del 0 al 10 (donde 10 es excelente) seguido de una breve explicación.
 Formato: "Puntuación: X. Explicación: ..."
 """
     
     try:
-        quality_response = llm.generate(quality_prompt)
+        # ASYNC CHANGE
+        quality_response = await llm.agenerate(quality_prompt)
         
         # Extraer puntuación de la respuesta
         score_match = re.search(r"(\d+(?:\.\d+)?)", quality_response)
@@ -782,7 +745,8 @@ Responde SOLO con una palabra: "simple", "moderada" o "compleja".
 """
         
         try:
-            complexity_response = llm.generate(complexity_check_prompt)
+            # ASYNC CHANGE
+            complexity_response = await llm.agenerate(complexity_check_prompt)
             complexity = complexity_response.strip().lower()
             
             # Determinar longitud apropiada según complejidad
@@ -838,7 +802,11 @@ Respuesta original (con problemas o no adaptada):
 Respuesta mejorada (clara, natural, adaptada a la complejidad y fiel a la información):
 """
             try:
-                improved_output = llm.generate(improvement_prompt)
+                # ASYNC CHANGE
+                improved_output = await llm.agenerate(
+                    improvement_prompt, 
+                    stream_callback=stream_callback
+                )
                 thought_chain = add_thought(
                     thought_chain,
                     "Supervisor",
@@ -903,7 +871,11 @@ Respuesta actual (muy larga para esta pregunta):
 Respuesta ajustada (adaptada a la complejidad, natural y fiel a la información):
 """
                 try:
-                    shortened = llm.generate(shortening_prompt)
+                    # ASYNC CHANGE
+                    shortened = await llm.agenerate(
+                        shortening_prompt,
+                        stream_callback=stream_callback
+                    )
                     supervised_output = shortened.strip()
                     
                     # No recortar respuestas - permitir respuestas completas
@@ -971,7 +943,7 @@ Respuesta ajustada (adaptada a la complejidad, natural y fiel a la información)
         }
 
 
-def synthesizer_node(state: GraphState) -> Dict[str, Any]:
+async def synthesizer_node(state: GraphState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     Combina los resultados de los pasos anteriores y produce una respuesta final legible.
     SOLO interviene cuando se usaron múltiples herramientas (RAG + IP).
@@ -989,6 +961,11 @@ def synthesizer_node(state: GraphState) -> Dict[str, Any]:
     """
     results = state.results or []
     thought_chain = state.thought_chain or []
+    
+    # Obtener callback de streaming si existe
+    stream_callback = None
+    if config and "configurable" in config:
+        stream_callback = config["configurable"].get("stream_callback")
     
     # Verificar si hay un mensaje de rechazo (pregunta fuera de tema)
     rejection_message = getattr(state, 'rejection_message', None)
@@ -1074,7 +1051,8 @@ Responde SOLO con una palabra: "simple", "moderada" o "compleja".
             max_tokens_synthesis = 300
             
             try:
-                complexity_response = llm.generate(complexity_check_prompt)
+                # ASYNC CHANGE
+                complexity_response = await llm.agenerate(complexity_check_prompt)
                 complexity = complexity_response.strip().lower()
                 
                 # Determinar guía de longitud según complejidad
@@ -1118,7 +1096,14 @@ Responde SOLO con una palabra: "simple", "moderada" o "compleja".
             try:
                 # Usar max_tokens adaptado según complejidad
                 # No recortar respuestas - permitir respuestas completas según max_tokens configurado
-                final_answer = llm.generate(synthesis_prompt, max_tokens=max_tokens_synthesis).strip()
+                # Pasamos el callback para streaming real
+                # ASYNC CHANGE
+                final_answer = await llm.agenerate(
+                    synthesis_prompt, 
+                    max_tokens=max_tokens_synthesis,
+                    stream_callback=stream_callback  # Streaming en tiempo real
+                )
+                final_answer = final_answer.strip()
                 
                 thought_chain = add_thought(
                     thought_chain,
@@ -1147,7 +1132,7 @@ Responde SOLO con una palabra: "simple", "moderada" o "compleja".
                     "thought_chain": thought_chain
                 }
     
-    # CASO 2: Solo se usó IP - devolver resultado directamente sin modificar
+    # CASO 2: Solo se usó IP - usar LLM para formatear con streaming
     if has_ip_result and not has_rag_result and not has_dns_result:
         # Formatear resultados de IP usando el método centralizado
         ip_results = []
@@ -1170,34 +1155,118 @@ Responde SOLO con una palabra: "simple", "moderada" o "compleja".
             
             ip_results.append(formatted)
         
-        thought_chain = add_thought(
-            thought_chain,
-            "Sintetizador",
-            "Síntesis: solo IP",
-            f"Formateando {len(ip_results)} resultado(s) único(s)",
-            "success"
+        combined_raw = "\n\n".join(ip_results).strip()
+        
+        # Obtener el prompt original del usuario para contexto
+        user_prompt = get_user_prompt_from_messages(state.messages)
+        
+        # Usar LLM para presentar los resultados de manera natural con streaming
+        synthesis_prompt = (
+            f"Pregunta del usuario: {user_prompt}\n\n"
+            "Presenta los siguientes resultados de operaciones de red de manera clara y profesional.\n\n"
+            f"Resultados de operaciones IP:\n{combined_raw}\n\n"
+            "INSTRUCCIONES:\n"
+            "- Presenta los resultados tal como están, sin inventar información\n"
+            "- Usa un lenguaje claro y profesional\n"
+            "- Mantén el formato de los resultados (IPs, latencias, etc.)\n"
+            "- Si hay comparaciones, resáltalas claramente\n"
+            "- Usa **negrita** para valores importantes (IPs, latencias, dominios)\n\n"
+            "Presenta los resultados:"
         )
-        return {
-            "final_output": "\n\n".join(ip_results).strip(),
-            "thought_chain": thought_chain
-        }
+        
+        try:
+            # ASYNC CHANGE - Usar LLM con streaming
+            final_answer = await llm.agenerate(
+                synthesis_prompt,
+                max_tokens=800,
+                stream_callback=stream_callback  # Streaming en tiempo real
+            )
+            final_answer = final_answer.strip()
+            
+            thought_chain = add_thought(
+                thought_chain,
+                "Sintetizador",
+                "Síntesis: solo IP",
+                f"Presentando {len(ip_results)} resultado(s) con LLM",
+                "success"
+            )
+            return {
+                "final_output": final_answer,
+                "thought_chain": thought_chain
+            }
+        except Exception as e:
+            logger.warning(f"Error al procesar resultados IP con LLM: {e}, usando formato original")
+            # Fallback: usar resultados originales
+            thought_chain = add_thought(
+                thought_chain,
+                "Sintetizador",
+                "Síntesis: solo IP (fallback)",
+                f"Error al procesar con LLM, usando formato original",
+                "warning"
+            )
+            return {
+                "final_output": combined_raw,
+                "thought_chain": thought_chain
+            }
     
-    # CASO 2.5: Solo se usó DNS - devolver resultado directamente sin modificar
+    # CASO 2.5: Solo se usó DNS - usar LLM para formatear con streaming
     if has_dns_result and not has_rag_result and not has_ip_result:
         # Formatear resultados de DNS usando el método centralizado
         dns_results = [dns_tool.format_result(r) for r in results]
         
-        thought_chain = add_thought(
-            thought_chain,
-            "Sintetizador",
-            "Síntesis: solo DNS",
-            f"Formateando {len(dns_results)} resultado(s)",
-            "success"
+        combined_raw = "\n\n".join(dns_results).strip()
+        
+        # Obtener el prompt original del usuario para contexto
+        user_prompt = get_user_prompt_from_messages(state.messages)
+        
+        # Usar LLM para presentar los resultados de manera natural con streaming
+        synthesis_prompt = (
+            f"Pregunta del usuario: {user_prompt}\n\n"
+            "Presenta los siguientes resultados de consultas DNS de manera clara y profesional.\n\n"
+            f"Resultados de operaciones DNS:\n{combined_raw}\n\n"
+            "INSTRUCCIONES:\n"
+            "- Presenta los resultados tal como están, sin inventar información\n"
+            "- Usa un lenguaje claro y profesional\n"
+            "- Mantén el formato de los registros DNS (A, MX, TXT, etc.)\n"
+            "- Si hay múltiples registros, organízalos claramente\n"
+            "- Usa **negrita** para valores importantes (dominios, IPs, servidores)\n\n"
+            "Presenta los resultados:"
         )
-        return {
-            "final_output": "\n\n".join(dns_results).strip(),
-            "thought_chain": thought_chain
-        }
+        
+        try:
+            # ASYNC CHANGE - Usar LLM con streaming
+            final_answer = await llm.agenerate(
+                synthesis_prompt,
+                max_tokens=800,
+                stream_callback=stream_callback  # Streaming en tiempo real
+            )
+            final_answer = final_answer.strip()
+            
+            thought_chain = add_thought(
+                thought_chain,
+                "Sintetizador",
+                "Síntesis: solo DNS",
+                f"Presentando {len(dns_results)} resultado(s) con LLM",
+                "success"
+            )
+            return {
+                "final_output": final_answer,
+                "thought_chain": thought_chain
+            }
+        except Exception as e:
+            logger.warning(f"Error al procesar resultados DNS con LLM: {e}, usando formato original")
+            # Fallback: usar resultados originales
+            thought_chain = add_thought(
+                thought_chain,
+                "Sintetizador",
+                "Síntesis: solo DNS (fallback)",
+                f"Error al procesar con LLM, usando formato original",
+                "warning"
+            )
+            return {
+                "final_output": combined_raw,
+                "thought_chain": thought_chain
+            }
     
     # CASO 3: Se usaron AMBAS herramientas (RAG + IP) - usar synthesizer para combinar
     # Este es el único caso donde el synthesizer debe intervenir
@@ -1267,7 +1336,11 @@ Responde SOLO con una palabra: "simple", "moderada" o "compleja".
         )
 
         try:
-            final_response = llm.generate(synthesis_prompt)
+            # ASYNC CHANGE
+            final_response = await llm.agenerate(
+                synthesis_prompt,
+                stream_callback=stream_callback  # Streaming en tiempo real
+            )
             thought_chain = add_thought(
                 thought_chain,
                 "Sintetizador",

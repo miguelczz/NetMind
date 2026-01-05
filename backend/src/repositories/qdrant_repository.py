@@ -447,3 +447,19 @@ class QdrantRepository:
             logger.error(f"[QdrantRepository] Error al obtener información de colección: {e}", exc_info=True)
             return {"error": str(e)}
 
+
+# Singleton instance
+_qdrant_repo_instance = None
+
+
+def get_qdrant_repository() -> QdrantRepository:
+    """
+    Obtiene la instancia singleton de QdrantRepository.
+    Garantiza que solo se inicialice una vez la conexión con Qdrant.
+    """
+    global _qdrant_repo_instance
+    if _qdrant_repo_instance is None:
+        _qdrant_repo_instance = QdrantRepository()
+    return _qdrant_repo_instance
+
+

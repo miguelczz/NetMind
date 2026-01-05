@@ -81,7 +81,7 @@ def get_conversation_context(messages: List[AnyMessage], max_messages: int = 10)
     return result
 
 
-def execute_ip_tool(step: str, prompt: str, messages: List[AnyMessage]) -> Dict[str, Any]:
+def execute_ip_tool(step: str, prompt: str, messages: List[AnyMessage], stream_callback=None) -> Dict[str, Any]:
     """
     Ejecuta la herramienta IP según el tipo de operación detectada.
     
@@ -89,6 +89,7 @@ def execute_ip_tool(step: str, prompt: str, messages: List[AnyMessage]) -> Dict[
         step: Paso del plan actual
         prompt: Prompt del usuario
         messages: Mensajes de la conversación
+        stream_callback: Callback opcional para streaming de resultados
     
     Returns:
         Resultado de la ejecución
@@ -482,7 +483,7 @@ Responde con los nombres (uno por línea):
     return hosts
 
 
-def execute_rag_tool(step: str, prompt: str, messages: List[AnyMessage]) -> Dict[str, Any]:
+def execute_rag_tool(step: str, prompt: str, messages: List[AnyMessage], stream_callback=None) -> Dict[str, Any]:
     """
     Ejecuta la herramienta RAG.
     
@@ -490,6 +491,7 @@ def execute_rag_tool(step: str, prompt: str, messages: List[AnyMessage]) -> Dict
         step: Paso del plan actual
         prompt: Prompt del usuario
         messages: Mensajes de la conversación
+        stream_callback: Callback opcional para streaming de resultados (no usado aquí, el streaming se hace en synthesizer)
     
     Returns:
         Resultado de la ejecución
@@ -740,7 +742,7 @@ Respuesta (directa y compacta):
     return result
 
 
-def execute_dns_tool(step: str, prompt: str, messages: List[AnyMessage]) -> Dict[str, Any]:
+def execute_dns_tool(step: str, prompt: str, messages: List[AnyMessage], stream_callback=None) -> Dict[str, Any]:
     """
     Ejecuta la herramienta DNS según el tipo de operación detectada.
     
@@ -748,6 +750,7 @@ def execute_dns_tool(step: str, prompt: str, messages: List[AnyMessage]) -> Dict
         step: Paso del plan actual
         prompt: Prompt del usuario
         messages: Mensajes de la conversación
+        stream_callback: Callback opcional para streaming de resultados
     
     Returns:
         Resultado de la ejecución

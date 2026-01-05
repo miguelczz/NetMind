@@ -9,7 +9,7 @@ import concurrent.futures
 from typing import Optional, List, Dict, Any
 from openai import OpenAI
 from ..settings import settings
-from ..repositories.qdrant_repository import QdrantRepository
+from ..repositories.qdrant_repository import QdrantRepository, get_qdrant_repository
 from ..utils.embeddings import embedding_for_text
 from ..core.cache import cache_result
 
@@ -18,7 +18,7 @@ from ..core.cache import cache_result
 # para evitar bloquear el event loop. El cliente puede usar time.sleep internamente para retries.
 client = OpenAI(
     api_key=settings.openai_api_key,
-    max_retries=2  # Limitar retries para reducir tiempo de bloqueo
+    max_retries=2
 )
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ Respuesta:
     }
     
     def __init__(self):
-        self.qdrant_repo = QdrantRepository()
+        self.qdrant_repo = get_qdrant_repository()
 
     async def _query_without_cache(self, query_text: str, top_k: int = 8, conversation_context: Optional[str] = None):
         """

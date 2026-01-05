@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session as SQLSession
 from ..models.schemas import FileUploadResponse, FileListResponse
 from ..models.database import get_db
 from ..repositories.document_repository import DocumentRepository
-from ..repositories.qdrant_repository import QdrantRepository
+from ..repositories.qdrant_repository import get_qdrant_repository
 from ..services.embeddings_service import process_and_store_pdf, delete_by_id
 from datetime import datetime
 
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/files", tags=["files"])
 
 # Instancias de repositorios
 document_repo = DocumentRepository()
-qdrant_repo = QdrantRepository()
+qdrant_repo = get_qdrant_repository()
 
 @router.post("/upload", status_code=201, response_model=FileUploadResponse)
 async def upload_pdf(

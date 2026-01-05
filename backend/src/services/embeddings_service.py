@@ -5,15 +5,16 @@ import os
 import uuid
 import logging
 from typing import List
-from ..repositories.qdrant_repository import QdrantRepository
+from ..repositories.qdrant_repository import get_qdrant_repository
 from ..utils.text_processing import text_splitter, process_pdf_to_text
 from ..utils.embeddings import embedding_for_text_batch
 from ..settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Instancia global del repositorio Qdrant
-_qdrant_repo = QdrantRepository()
+# Instancia global del repositorio Qdrant (Lazy loaded via singleton)
+# _qdrant_repo se puede reemplazar por llamadas directas a get_qdrant_repository() pero para minimizar cambios:
+_qdrant_repo = get_qdrant_repository()
 
 
 async def process_and_store_pdf(path: str, document_id: str = None) -> str:

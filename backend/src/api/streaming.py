@@ -22,8 +22,7 @@ async def stream_graph_execution(
     session_id: str
 ) -> AsyncIterator[str]:
     """
-    Ejecuta el grafo y stream los resultados usando SSE.
-    CORREGIDO: Simula streaming dividiendo la respuesta final en chunks.
+    Ejecuta el grafo y stream los resultados usando SSE (Streaming REAL).
     
     Args:
         initial_state: Estado inicial del grafo
@@ -32,91 +31,120 @@ async def stream_graph_execution(
     Yields:
         Chunks de datos en formato SSE
     """
-    try:
-        import asyncio
-        
-        final_state = None
-        
-        # Ejecutar el grafo UNA SOLA VEZ
-        async for chunk in graph.astream(initial_state, stream_mode="updates"):
-            # chunk es un diccionario con las actualizaciones de cada nodo
-            # Formato: {node_name: {state_updates}}
-            
-            for node_name, state_updates in chunk.items():
-                # Enviar actualización de nodo
-                node_data = {
-                    "type": "node_update",
-                    "data": {
-                        "node": node_name,
-                        "status": "completed"
-                    }
+    import asyncio
+    
+    # Cola para comunicar eventos desde el grafo (thread/task de fondo) hacia el generador SSE
+    event_queue = asyncio.Queue()
+    
+    # Callback para streaming de tokens desde el LLM
+    def stream_callback(token):
+        if token:
+            event_queue.put_nowait({
+                "type": "token",
+                "content": token
+            })
+    
+    # Función wrapper para ejecutar el grafo en background
+    async def run_graph():
+        try:
+            # Configurar callback para que los nodos (Synthesizer/Supervisor) puedan usarlo
+            config = {
+                "configurable": {
+                    "stream_callback": stream_callback
                 }
-                yield f"data: {json.dumps(node_data)}\n\n"
-                
-                # Capturar el estado final cuando llegue
-                if state_updates:
-                    final_state = state_updates
-        
-        # Obtener respuesta final completa
-        if final_state:
-            supervised_output = final_state.get('supervised_output')
-            final_output = final_state.get('final_output')
-            assistant_response = supervised_output or final_output or "No se pudo generar una respuesta."
+            }
             
-            # PSEUDO-STREAMING: Dividir la respuesta en chunks pequeños
-            # Esto simula el efecto visual de streaming sin modificar todo el código
-            chunk_size = 5  # Caracteres por chunk (más pequeño = más fluido)
-            for i in range(0, len(assistant_response), chunk_size):
-                chunk_text = assistant_response[i:i + chunk_size]
+            # Ejecutar el grafo (esto puede tomar tiempo)
+            # Usamos ainvoke con config para pasar el callback
+            final_state = await graph.ainvoke(initial_state, config=config)
+            
+            # Al terminar, enviar el estado final
+            event_queue.put_nowait({
+                "type": "final_state",
+                "state": final_state
+            })
+            
+        except Exception as e:
+            logger.error(f"Error ejecutando grafo en background: {e}", exc_info=True)
+            event_queue.put_nowait({
+                "type": "error",
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+        finally:
+            # Señal de finalización
+            event_queue.put_nowait({"type": "done"})
+
+    # Iniciar la tarea en background
+    graph_task = asyncio.create_task(run_graph())
+    
+    try:
+        while True:
+            # Esperar el siguiente evento de la cola
+            # Usamos wait_for para detectar si la tarea murió silenciosamente (timeout opcional)
+            event = await event_queue.get()
+            
+            event_type = event.get("type")
+            
+            if event_type == "token":
+                # Enviar token inmediatamente
                 token_data = {
                     "type": "token",
                     "data": {
-                        "content": chunk_text
+                        "content": event.get("content")
                     }
                 }
                 yield f"data: {json.dumps(token_data)}\n\n"
-                # Delay para simular streaming (50ms = velocidad visible pero no molesta)
-                await asyncio.sleep(0.05)  # 50ms entre chunks
+                
+            elif event_type == "node_update":
+                # (Opcional) Si implementamos callbacks de nodos en el futuro
+                pass
+                
+            elif event_type == "final_state":
+                # Procesar estado final
+                final_state = event.get("state")
+                if final_state:
+                    supervised_output = final_state.get('supervised_output')
+                    final_output = final_state.get('final_output')
+                    assistant_response = supervised_output or final_output or "No se pudo generar una respuesta."
+                    
+                    response_data = {
+                        "type": "final_response",
+                        "data": {
+                            "content": assistant_response,
+                            "executed_tools": final_state.get('executed_tools', []),
+                            "executed_steps": final_state.get('executed_steps', []),
+                            "thought_chain": final_state.get('thought_chain', []) if settings.show_thought_chain else None,
+                        }
+                    }
+                    yield f"data: {json.dumps(response_data)}\n\n"
             
-            # Enviar respuesta final completa con metadatos
-            response_data = {
-                "type": "final_response",
-                "data": {
-                    "content": assistant_response,
-                    "executed_tools": final_state.get('executed_tools', []),
-                    "executed_steps": final_state.get('executed_steps', []),
-                    "thought_chain": final_state.get('thought_chain', []) if settings.show_thought_chain else None,
+            elif event_type == "error":
+                error_data = {
+                    "type": "error",
+                    "data": {
+                        "message": event.get("error"),
+                        "type": event.get("error_type"),
+                    }
                 }
-            }
-            yield f"data: {json.dumps(response_data)}\n\n"
-        else:
-            # Si no hay estado final, enviar error
-            error_data = {
-                "type": "error",
-                "data": {
-                    "message": "No se pudo generar una respuesta",
-                    "type": "NoStateError",
-                }
-            }
-            yield f"data: {json.dumps(error_data)}\n\n"
-        
-        # Señal de finalización
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        
+                if settings.debug:
+                    import traceback
+                    error_data["data"]["traceback"] = traceback.format_exc()
+                yield f"data: {json.dumps(error_data)}\n\n"
+                # Salir del loop en caso de error
+                break
+                
+            elif event_type == "done":
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                break
+            
+            event_queue.task_done()
+            
     except Exception as e:
-        logger.error(f"Error en streaming para sesión {session_id}: {str(e)}", exc_info=True)
-        error_data = {
-            "type": "error",
-            "data": {
-                "message": str(e),
-                "type": type(e).__name__,
-            }
-        }
-        if settings.debug:
-            import traceback
-            error_data["data"]["traceback"] = traceback.format_exc()
-        
-        yield f"data: {json.dumps(error_data)}\n\n"
+        logger.error(f"Error en loop de streaming para sesión {session_id}: {str(e)}", exc_info=True)
+        # Intentar cancelar la tarea de fondo
+        graph_task.cancel()
+        yield f"data: {json.dumps({'type': 'error', 'data': {'message': str(e)}})}\n\n"
 
 
 @router.post("/query/stream")
