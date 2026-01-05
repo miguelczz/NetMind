@@ -6,8 +6,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    iputils-ping \
+    traceroute \
+    dnsutils \
     && rm -rf /var/lib/apt/lists/*
-
 # Copiar requirements primero (para cache de Docker)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
