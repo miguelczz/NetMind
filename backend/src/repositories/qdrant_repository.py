@@ -62,15 +62,10 @@ class QdrantRepository:
         if not url:
             return url
         
-        # Si es HTTPS y tiene :6333, quitar el puerto SOLO si es Qdrant Cloud (qdrant.tech)
-        # Para entornos self-hosted o desarrollo, respetar el puerto explícito
+        # Si es HTTPS y tiene :6333, quitar el puerto (Qdrant Cloud usa 443)
         if url.startswith('https://') and ':6333' in url:
-            is_cloud = 'qdrant.tech' in url or 'qdrant.io' in url
-            if is_cloud:
-                url = url.replace(':6333', '')
-                logger.info(f"[QdrantRepository] URL normalizada (puerto 6333 removido para Qdrant Cloud): {self._mask_url(url)}")
-            else:
-                logger.debug(f"[QdrantRepository] Respetando puerto explícito en URL self-hosted: {self._mask_url(url)}")
+            url = url.replace(':6333', '')
+            logger.info(f"[QdrantRepository] URL normalizada (puerto 6333 removido para HTTPS): {self._mask_url(url)}")
         
         return url
     
