@@ -687,24 +687,23 @@ Genera la respuesta con el disclaimer y la información técnica completa:
 
     # Validar calidad de la respuesta usando LLM
     quality_prompt = f"""
-Evalúa la siguiente respuesta generada para el usuario y determina:
-1. Si responde directamente a la pregunta del usuario
-2. Si es clara y concisa
-3. Si contiene información relevante
-4. Si hay errores obvios o información incorrecta
-5. Si la respuesta indica que la pregunta está FUERA DEL TEMA de redes/telecomunicaciones (ej: "No puedo responder preguntas sobre cocina", etc).
+Evalúa la siguiente respuesta generada para el usuario y determina su calidad con un puntaje del 0 al 10.
 
 Pregunta del usuario: "{user_prompt}"
 
 Respuesta generada:
 {final_output}
 
-INSTRUCCIONES DE PUNTUACIÓN:
-- Si la respuesta indica CORRECTAMENTE que la pregunta está fuera de tema, asigna un puntaje de 10 (Excelente manejo de límites).
-- Si la respuesta es técnica y correcta, asigna puntaje alto.
-- Si la respuesta es vaga, incorrecta o no responde, asigna puntaje bajo.
+CRITERIOS DE APROBACIÓN (Sé indulgente si la información es útil):
+- Si la respuesta es técnicamente correcta y útil: Dale 8 o más (APROBADO).
+- Si responde a la pregunta, aunque el estilo podría mejorar: Dale 7 o más (APROBADO).
+- Solo reprueba (puntuación < 5) si:
+  1. Hay información FALSA o ALUCINADA.
+  2. No responde en absoluto a la pregunta.
+  3. Es incoherente o ininteligible.
+  4. Dice que no puede responder preguntas de "cocina" u otros temas cuando la pregunta SÍ es técnica.
 
-Responde SOLO con un número del 0 al 10 (donde 10 es excelente) seguido de una breve explicación.
+Responde SOLO con un número del 0 al 10 seguido de una breve explicación.
 Formato: "Puntuación: X. Explicación: ..."
 """
     
@@ -763,11 +762,11 @@ Responde SOLO con una palabra: "simple", "moderada" o "compleja".
             complexity = "moderada"  # Valor por defecto
             max_appropriate_length = 2000  # Aumentado de 800 a 2000
         
-        # Si la calidad es baja (< 0.5), intentar mejorar la respuesta
-        # SOLO ajustar longitud si la respuesta es EXCESIVAMENTE larga (más del doble del límite apropiado)
-        # Esto evita recortar respuestas que están ligeramente por encima del límite
-        response_too_long = len(final_output) > (max_appropriate_length * 2)
+        # Si la calidad es CRÍTICAMENTE baja (< 0.5), o la respuesta es ABSURDAMENTE larga (> 3 veces lo esperado)
+        # Esto reduce drásticamente las intervenciones del supervisor, mejorando el tiempo de respuesta
+        response_too_long = len(final_output) > (max_appropriate_length * 3)
         
+        # Umbral de calidad bajado a 0.5 para ser más permisivo (antes implícitamente más estricto)
         if quality_score < 0.5 or response_too_long:
             # Determinar guía de longitud según complejidad
             if "simple" in complexity:
